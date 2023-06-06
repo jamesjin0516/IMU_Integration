@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Video_IMU_Recorder</string>
+    <string name="record_prompt">Start video and IMU capture</string>
 </resources>
