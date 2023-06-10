@@ -1,13 +1,5 @@
 package com.example.video_imu_recorder;
 
-import androidx.activity.result.ActivityResultCallback;
-import androidx.activity.result.ActivityResultLauncher;
-import androidx.activity.result.contract.ActivityResultContracts.CaptureVideo;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.appcompat.widget.AppCompatButton;
-import androidx.core.content.FileProvider;
-
-import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.hardware.Sensor;
@@ -18,16 +10,12 @@ import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CameraMetadata;
-import android.media.CamcorderProfile;
-import android.media.EncoderProfiles;
-import android.net.Uri;
 import android.os.Bundle;
-import android.os.Environment;
-import android.os.SystemClock;
 import android.util.Log;
-import android.widget.Toast;
 
-import java.io.File;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.AppCompatButton;
+
 import java.util.Arrays;
 
 public class MainActivity extends AppCompatActivity implements SensorEventListener {
@@ -51,6 +39,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
         record_start.setOnClickListener(view -> {
             Intent record_data = new Intent(this, VideoRecord.class);
             // Locate back-facing camera
+            // TODO: instead of checking if device has back camera, formulate a new video file name and send to VideoCapture
             try {
                 String[] camera_IDs = camera_manager.getCameraIdList();
                 Log.d(VID, "Camera-IDs: " + Arrays.toString(camera_IDs));
@@ -68,7 +57,7 @@ public class MainActivity extends AppCompatActivity implements SensorEventListen
                 throw new UnsupportedOperationException("The device does not have a usable back camera for video recording.");
             }
             startActivity(record_data);
-            // TODO: stop IMU measurement after quitting video capture activity
+            // TODO: precisely synchronize IMU measurement with video capture start & stop
             sensor_manager.registerListener(this, linear_accelerometer, SensorManager.SENSOR_DELAY_NORMAL);
             sensor_manager.registerListener(this, gyroscope, SensorManager.SENSOR_DELAY_NORMAL);
         });

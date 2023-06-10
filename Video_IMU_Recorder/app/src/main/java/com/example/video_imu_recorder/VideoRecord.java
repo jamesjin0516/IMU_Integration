@@ -1,10 +1,12 @@
 package com.example.video_imu_recorder;
 
 import android.Manifest;
+import android.content.ContentValues;
 import android.content.pm.PackageManager;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraMetadata;
 import android.os.Bundle;
+import android.provider.MediaStore;
 import android.util.Log;
 import android.widget.Toast;
 
@@ -17,10 +19,13 @@ import androidx.camera.core.CameraInfo;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.Preview;
 import androidx.camera.lifecycle.ProcessCameraProvider;
+import androidx.camera.video.MediaStoreOutputOptions;
 import androidx.camera.video.Quality;
 import androidx.camera.video.QualitySelector;
 import androidx.camera.video.Recorder;
+import androidx.camera.video.Recording;
 import androidx.camera.video.VideoCapture;
+import androidx.camera.video.VideoRecordEvent;
 import androidx.camera.view.PreviewView;
 import androidx.core.content.ContextCompat;
 
@@ -39,6 +44,7 @@ public class VideoRecord extends AppCompatActivity {
     private static final String CAM = "Video record";
     private ListenableFuture<ProcessCameraProvider> camera_provider_future;
     private VideoCapture<Recorder> video_capture;
+    private Recording video_recording;
     PreviewView camera_preview;
 
     @Override
@@ -51,19 +57,25 @@ public class VideoRecord extends AppCompatActivity {
             requestPermissions(new String[] {Manifest.permission.CAMERA}, CAMERA_PERMISSION);
         }
 
-        // Establish camera controls
+        // Establish camera controls and start recording
         camera_preview = findViewById(R.id.camera_preview);
         camera_provider_future = ProcessCameraProvider.getInstance(this);
         camera_provider_future.addListener(() -> {
             try {
                 ProcessCameraProvider camera_provider = camera_provider_future.get();
                 bindPreviewAndVideo(camera_provider);
+                startVideoCapture();
             } catch (ExecutionException | InterruptedException exception) {
                 exception.printStackTrace();
             }
         }, ContextCompat.getMainExecutor(this));
 
-        // TODO: initiate the recording process and stop recording on click
+        // Stop recording and save the video upon clicking camera preview
+        findViewById(R.id.camera_preview).setOnClickListener(view -> {
+            video_recording.stop();
+            // On emulator, videos are saved to /sdcard/Movies/
+            finish();
+        });
     }
 
     @Override
@@ -73,7 +85,7 @@ public class VideoRecord extends AppCompatActivity {
             if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 Toast.makeText(this, "camera permission granted", Toast.LENGTH_LONG).show();
             } else {
-                Toast.makeText(this, "camera permission denied", Toast.LENGTH_LONG).show();
+                throw new UnsupportedOperationException("camera permission denied");
             }
         }
     }
@@ -87,7 +99,7 @@ public class VideoRecord extends AppCompatActivity {
 
         // Find available image qualities for back camera
         CameraInfo back_camera_info = camera_provider.getAvailableCameraInfos().stream().filter(camera_info ->
-            Camera2CameraInfo.from(camera_info).getCameraCharacteristic(CameraCharacteristics.LENS_FACING) == CameraMetadata.LENS_FACING_BACK
+                Camera2CameraInfo.from(camera_info).getCameraCharacteristic(CameraCharacteristics.LENS_FACING) == CameraMetadata.LENS_FACING_BACK
         ).collect(Collectors.toList()).get(0);
         Stream<Quality> available_qualities = QualitySelector.getSupportedQualities(back_camera_info).stream().filter(
                 quality -> Arrays.asList(Quality.UHD, Quality.FHD, Quality.HD, Quality.SD).contains(quality)
@@ -106,5 +118,36 @@ public class VideoRecord extends AppCompatActivity {
             Log.e(CAM, "Preview or video capture use case binding failed");
             throw illegal_argument_exception;
         }
+    }
+
+    private void startVideoCapture() {
+        if (video_capture == null) throw new UnsupportedOperationException("VideoCapture instance must be non-null." +
+                " Did you try to start capturing before binding video capture to the activity lifecycle?");
+        // Configure video output file location
+        String file_name = "Video.mp4";
+        ContentValues content_values = new ContentValues();
+        content_values.put(MediaStore.Video.Media.DISPLAY_NAME, file_name);
+        MediaStoreOutputOptions output_options = new MediaStoreOutputOptions.Builder(getContentResolver(),
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI).setContentValues(content_values).build();
+
+        // Start recording and listen for events during recording
+        video_recording = video_capture.getOutput().prepareRecording(this, output_options)
+                .start(ContextCompat.getMainExecutor(this), video_record_event -> {
+                    if (video_record_event instanceof VideoRecordEvent.Start) {
+                        Toast.makeText(this, "Recording started", Toast.LENGTH_SHORT).show();
+                    } else if (video_record_event instanceof VideoRecordEvent.Pause) {
+                        Toast.makeText(this, "Recording paused", Toast.LENGTH_SHORT).show();
+                    } else if (video_record_event instanceof VideoRecordEvent.Resume) {
+                        Toast.makeText(this, "Recording resumed", Toast.LENGTH_SHORT).show();
+                    } else if (video_record_event instanceof VideoRecordEvent.Finalize) {
+                        VideoRecordEvent.Finalize finalize_event = (VideoRecordEvent.Finalize) video_record_event;
+                        if (finalize_event.getError() != VideoRecordEvent.Finalize.ERROR_NONE) {
+                            Toast.makeText(this, "Recording error!", Toast.LENGTH_SHORT).show();
+                            assert finalize_event.getCause() != null;
+                            throw new RuntimeException(finalize_event.getCause().getMessage());
+                        }
+                        Log.i(CAM, "Video path: " + finalize_event.getOutputResults().getOutputUri().getPath());
+                    }
+                });
     }
 }
