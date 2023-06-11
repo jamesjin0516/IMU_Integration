@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">Video_IMU_Recorder</string>
     <string name="record_prompt">Start video and IMU capture</string>
+    <string name="record_hint">(Recording starts immediately (after granting permission).\nClick on video preview to stop recording and save data)</string>
 </resources>
