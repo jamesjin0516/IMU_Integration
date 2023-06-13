@@ -45,6 +45,7 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.NoSuchElementException;
 import java.util.concurrent.ExecutionException;
@@ -53,21 +54,19 @@ import java.util.stream.Stream;
 
 public class VideoRecord extends AppCompatActivity implements SensorEventListener {
 
-    private static String back_camera_id;
-    private static final int CAMERA_PERMISSION = 100;
+    private static final int CAMERA_PERMISSION = new SecureRandom().nextInt(100);
     private static final String CAM = "Video record", FILE = "IMU data file";
-    private ListenableFuture<ProcessCameraProvider> camera_provider_future;
     private VideoCapture<Recorder> video_capture;
     private Recording video_recording;
-    private PreviewView camera_preview;
     private SensorManager sensor_manager;
     private Sensor linear_accelerometer, gyroscope;
     private File imu_data;
     private FileOutputStream output_stream;
+    private static long record_start_time = Long.MIN_VALUE, last_save_time = 0;
 
     /*
     The IMU data is stored under the following format (A more sophisticated tabular format is also possible in Android)
-    <Time stamp: a single number in nano seconds> <sensor name> <sensor data: a comma-separated list with square brackets>
+    <nano seconds elapsed since an external time instant> <sensor name> <[a comma-separated list with sensor data]>
     Example:
     1578699792815 Goldfish 3-axis Gyroscope [0.0, 0.0, 0.0]
     */
@@ -75,8 +74,9 @@ public class VideoRecord extends AppCompatActivity implements SensorEventListene
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        back_camera_id = getIntent().getStringExtra("back_camera_id");
         setContentView(R.layout.activity_record);
+        String imu_data_name = getIntent().getStringExtra("imu_data_name");
+        String video_name = getIntent().getStringExtra("video_name");
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_DENIED) {
             requestPermissions(new String[] {Manifest.permission.CAMERA}, CAMERA_PERMISSION);
@@ -86,16 +86,16 @@ public class VideoRecord extends AppCompatActivity implements SensorEventListene
         linear_accelerometer = sensor_manager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION);
         gyroscope = sensor_manager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
 
-        prepareIMUDataFile("IMU_data.txt");
+        prepareIMUDataFile(imu_data_name);
 
         // Establish camera controls and start recording
-        camera_preview = findViewById(R.id.camera_preview);
-        camera_provider_future = ProcessCameraProvider.getInstance(this);
+        PreviewView camera_preview = findViewById(R.id.camera_preview);
+        ListenableFuture<ProcessCameraProvider> camera_provider_future = ProcessCameraProvider.getInstance(this);
         camera_provider_future.addListener(() -> {
             try {
                 ProcessCameraProvider camera_provider = camera_provider_future.get();
-                bindPreviewAndVideo(camera_provider);
-                startVideoCapture();
+                bindPreviewAndVideo(camera_provider, camera_preview);
+                startVideoCapture(video_name);
             } catch (ExecutionException | InterruptedException exception) {
                 exception.printStackTrace();
             }
@@ -104,21 +104,23 @@ public class VideoRecord extends AppCompatActivity implements SensorEventListene
         // Stop recording and save the video upon clicking camera preview
         camera_preview.setOnClickListener(view -> {
             video_recording.stop();
-            // On emulator, videos are saved to /storage/emulated/0/Movies/.
-            // Videos will NOT overwrite given the same file name, but IMU data will.
+            // On emulator, videos are saved to /storage/emulated/0/Movies/
             finish();
         });
     }
 
     private void prepareIMUDataFile(String filename) {
-        // Create a new file to store IMU measurement data. Location (on emulator): /storage/emulated/0/Documents/
-        imu_data = new File(Environment.getExternalStorageDirectory() + "/Documents/", filename);
-        // TODO: once file name generation is implemented in MainActivity, remove this behaviour
-        if (imu_data.exists()) imu_data.delete();
+        /*
+        Create a new file to store IMU measurement data. Location (on emulator):
+        /storage/emulated/0/Android/data/com.example.video_imu_recorder/files/Documents
+        */
+        imu_data = new File(ContextCompat.getExternalFilesDirs(this, Environment.DIRECTORY_DOCUMENTS)[0], filename);
         try {
             imu_data.createNewFile();
+            Log.d(FILE, "imu data file (exists: " + imu_data.exists() + ") at " + imu_data.getPath());
         } catch (IOException exception) {
             exception.printStackTrace();
+            Log.e(FILE, "Creation failed: " + imu_data.getPath());
             Toast.makeText(this, "IMU data storage file cannot be created", Toast.LENGTH_LONG).show();
             finish();
         }
@@ -128,7 +130,7 @@ public class VideoRecord extends AppCompatActivity implements SensorEventListene
         try {
             output_stream = new FileOutputStream(imu_data, true);
         } catch (FileNotFoundException exception) {
-            Log.e(FILE, "FileOutputStream creation failed");
+            Log.e(FILE, "FileOutputStream failed to be opened");
             exception.printStackTrace();
             Toast.makeText(this, "IMU data storage file cannot be opened", Toast.LENGTH_LONG).show();
             finish();
@@ -138,10 +140,10 @@ public class VideoRecord extends AppCompatActivity implements SensorEventListene
     private void closeIMUDataOutputStream() {
         try {
             output_stream.close();
-        } catch (IOException e) {
-            Log.e(FILE, "FileOutputStream calling close() method failed");
+        } catch (IOException exception) {
+            Log.e(FILE, "FileOutputStream failed to close");
             Toast.makeText(this, "IMU data failed to save, data lost!", Toast.LENGTH_SHORT).show();
-            e.printStackTrace();
+            exception.printStackTrace();
         }
     }
 
@@ -152,14 +154,14 @@ public class VideoRecord extends AppCompatActivity implements SensorEventListene
             if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 Toast.makeText(this, "camera permission granted", Toast.LENGTH_LONG).show();
             } else {
-                Toast.makeText(this, "camera permission denied", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "camera permission denied, aborting", Toast.LENGTH_LONG).show();
                 finish();
             }
         }
     }
 
     @OptIn(markerClass = ExperimentalCamera2Interop.class)
-    private void bindPreviewAndVideo(ProcessCameraProvider camera_provider) {
+    private void bindPreviewAndVideo(ProcessCameraProvider camera_provider, PreviewView camera_preview) {
         // Prepare screen to display camera preview
         Preview preview = new Preview.Builder().build();
         CameraSelector camera_selector = new CameraSelector.Builder().requireLensFacing(CameraSelector.LENS_FACING_BACK).build();
@@ -188,16 +190,14 @@ public class VideoRecord extends AppCompatActivity implements SensorEventListene
         }
     }
 
-    private void startVideoCapture() {
+    private void startVideoCapture(String video_name) {
         if (video_capture == null) throw new UnsupportedOperationException("VideoCapture instance must be non-null." +
                 " Did you try to start capturing before binding video capture to the activity lifecycle?");
         // Configure video output file location
-        String file_name = "Video.mp4";
         ContentValues content_values = new ContentValues();
-        content_values.put(MediaStore.Video.Media.DISPLAY_NAME, file_name);
+        content_values.put(MediaStore.Video.Media.DISPLAY_NAME, video_name);
         MediaStoreOutputOptions output_options = new MediaStoreOutputOptions.Builder(getContentResolver(),
                 MediaStore.Video.Media.EXTERNAL_CONTENT_URI).setContentValues(content_values).build();
-
         // Start recording and listen for events during recording
         video_recording = video_capture.getOutput().prepareRecording(this, output_options)
                 .start(ContextCompat.getMainExecutor(this), record_event_listener);
@@ -205,13 +205,20 @@ public class VideoRecord extends AppCompatActivity implements SensorEventListene
 
     private final Consumer<VideoRecordEvent> record_event_listener = video_record_event -> {
 
+        // Close and re-open the FileOutputStream object every 3 seconds to avoid overwhelming file write buffer
+        long current_time = video_record_event.getRecordingStats().getRecordedDurationNanos();
+        if ((current_time - last_save_time > 3 * Math.pow(10, 9))) {
+            last_save_time = current_time;
+            closeIMUDataOutputStream();
+            openIMUDataOutputStream();
+        }
+
         if (video_record_event instanceof VideoRecordEvent.Start) {
+            record_start_time = SystemClock.elapsedRealtimeNanos();
             // Enable writing to IMU data file, start receiving sensor data, and broadcast recording start
             openIMUDataOutputStream();
             sensor_manager.registerListener(this, linear_accelerometer, SensorManager.SENSOR_DELAY_NORMAL);
             sensor_manager.registerListener(this, gyroscope, SensorManager.SENSOR_DELAY_NORMAL);
-            // TODO: broadcast all recording events distinguished by an extra intent data
-            broadcast_record_status(String.valueOf(VideoRecordEvent.Start.class));
             Toast.makeText(this, "Recording started", Toast.LENGTH_SHORT).show();
 
         } else if (video_record_event instanceof VideoRecordEvent.Pause) {
@@ -223,34 +230,39 @@ public class VideoRecord extends AppCompatActivity implements SensorEventListene
             Toast.makeText(this, "Recording resumed", Toast.LENGTH_SHORT).show();
 
         } else if (video_record_event instanceof VideoRecordEvent.Finalize) {
+            // Stop reading from sensors, close imu data file, and check if recording has any errors
             sensor_manager.unregisterListener(this);
             closeIMUDataOutputStream();
             VideoRecordEvent.Finalize finalize_event = (VideoRecordEvent.Finalize) video_record_event;
+            String final_message = finalize_event.getClass().getName();
             if (finalize_event.getError() != VideoRecordEvent.Finalize.ERROR_NONE) {
                 Toast.makeText(this, "Recording error!", Toast.LENGTH_SHORT).show();
                 assert finalize_event.getCause() != null;
-                throw new RuntimeException(finalize_event.getCause().getMessage());
+                final_message += finalize_event.getCause().getMessage();
+                Log.e(CAM, finalize_event.getCause().getMessage());
             }
+            broadcast_record_status(final_message);
             Log.i(CAM, "Video path: " + finalize_event.getOutputResults().getOutputUri().getPath());
-        }
-
-        // Close and re-open the FileOutputStream object every 5 seconds to avoid overwhelming buffer
-        if ((video_record_event.getRecordingStats().getRecordedDurationNanos() / 1000000000) % 5 == 0) {
-            closeIMUDataOutputStream();
-            openIMUDataOutputStream();
         }
     };
 
     private void broadcast_record_status(String status) {
+        Log.i(CAM, "status to broadcast: " + status);
         Intent broadcast = new Intent();
-        broadcast.setAction(getPackageName() + "." + status);
+        broadcast.setAction(getPackageName() + ".RECORD_STATUS");
+        broadcast.putExtra("status", status);
         broadcast.setPackage(getPackageName());
         sendBroadcast(broadcast);
     }
 
     @Override
     public void onSensorChanged(SensorEvent event) {
+        if (record_start_time != Long.MIN_VALUE) {
+            Log.i(FILE, "Latency: " + (SystemClock.elapsedRealtimeNanos() - record_start_time));
+            record_start_time = Long.MIN_VALUE;
+        }
         String data = SystemClock.elapsedRealtimeNanos() + " " + event.sensor.getName() + " " + Arrays.toString(event.values) + "\n";
+        Log.v(FILE, "imu data: " + data);
         try {
             output_stream.write(data.getBytes(StandardCharsets.UTF_8));
         } catch (IOException exception) {
@@ -260,6 +272,6 @@ public class VideoRecord extends AppCompatActivity implements SensorEventListene
 
     @Override
     public void onAccuracyChanged(Sensor sensor, int accuracy) {
-        Log.d("Sensor accuracy", sensor.getName() + " accuracy changed to " + accuracy);
+        Log.v(FILE, sensor.getName() + " accuracy changed to " + accuracy);
     }
 }
