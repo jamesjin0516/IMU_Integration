@@ -11,6 +11,7 @@ import android.hardware.camera2.CameraMetadata;
 import android.os.Bundle;
 import android.util.Log;
 import android.util.Pair;
+import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.AppCompatButton;
@@ -33,9 +34,13 @@ public class MainActivity extends AppCompatActivity {
         public void onReceive(Context context, Intent intent) {
             String status = intent.getStringExtra("status");
             Log.i(VID, "status received from broadcast: " + status);
+            // Verify whether the broadcast indicates that the recording has stopped
             if (status.contains(VideoRecordEvent.Finalize.class.getName())) {
+                // Verify whether the broadcast indicates an error-free recording
                 if (status.equals(VideoRecordEvent.Finalize.class.getName())) {
                     ++record_count;
+                    TextView record_counter = findViewById(R.id.record_counter);
+                    record_counter.setText(getString(R.string.count_designator, record_count));
                     Log.i(VID, "Incremented record_count, now at " + record_count);
                 }
                 unregisterReceiver(this);
@@ -93,6 +98,13 @@ public class MainActivity extends AppCompatActivity {
         String video_name = date + "_video_" + record_count + ".mp4";
         String imu_data_name = date + "_IMU_data_" + record_count + ".txt";
         return new Pair<>(video_name, imu_data_name);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        TextView record_counter = findViewById(R.id.record_counter);
+        record_counter.setText(getString(R.string.count_designator, record_count));
     }
 
     @Override

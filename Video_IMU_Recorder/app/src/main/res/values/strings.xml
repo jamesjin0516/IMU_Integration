@@ -1,5 +1,7 @@
 <resources>
     <string name="app_name">Video_IMU_Recorder</string>
     <string name="record_prompt">Start video and IMU capture</string>
-    <string name="record_hint">(Recording starts immediately (after granting permission).\nClick on video preview to stop recording and save data)</string>
+    <string name="count_designator">Current recording session: %1$d</string>
+    <string name="overwrite_notice">The recording session number generates file names; if the number fails to increment, data will be overwritten or appended to.</string>
+    <string name="record_hint">Recording starts immediately (after granting permission).\nClick on video preview to stop recording and save data.</string>
 </resources>
