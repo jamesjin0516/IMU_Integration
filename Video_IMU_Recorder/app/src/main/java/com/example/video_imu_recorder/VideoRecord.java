@@ -25,6 +25,9 @@ import androidx.camera.camera2.interop.ExperimentalCamera2Interop;
 import androidx.camera.core.CameraInfo;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.CameraXConfig;
+import androidx.camera.core.ExperimentalZeroShutterLag;
+import androidx.camera.core.ImageCapture;
+import androidx.camera.core.ImageCaptureException;
 import androidx.camera.core.Preview;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.video.FileOutputOptions;
@@ -41,6 +44,7 @@ import androidx.core.util.Consumer;
 import com.google.common.util.concurrent.ListenableFuture;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -55,13 +59,13 @@ import java.util.stream.Stream;
 public class VideoRecord extends AppCompatActivity implements SensorEventListener, CameraXConfig.Provider {
 
     private static final int CAMERA_PERMISSION = new SecureRandom().nextInt(100);
-    private static final String CAM = "Video record", FILE = "IMU data file";
-    private ProcessCameraProvider camera_provider;
+    private static final String CAM = "Capture_use_cases", FILE = "IMU_data_file";
     private VideoCapture<Recorder> video_capture;
+    private ImageCapture image_capture;
     private Recording video_recording;
     private SensorManager sensor_manager;
     private Sensor linear_accelerometer, gyroscope;
-    private File imu_data;
+    private File imu_data, image_folder;
     private FileOutputStream output_stream;
     private final long[] video_imu_start_times = {-1, -1};
     private long last_save_time = 0;
@@ -93,8 +97,8 @@ public class VideoRecord extends AppCompatActivity implements SensorEventListene
         ListenableFuture<ProcessCameraProvider> camera_provider_future = ProcessCameraProvider.getInstance(this);
         camera_provider_future.addListener(() -> {
             try {
-                camera_provider = camera_provider_future.get();
-                bindPreviewAndVideo(camera_preview);
+                ProcessCameraProvider camera_provider = camera_provider_future.get();
+                bindPreviewAndVideo(camera_provider, camera_preview);
                 startDataCollection(video_name, imu_data_name);
             } catch (IOException | InterruptedException | ExecutionException | IllegalArgumentException exception) {
                 exception.printStackTrace();
@@ -104,7 +108,6 @@ public class VideoRecord extends AppCompatActivity implements SensorEventListene
         // Stop recording and save the video and imu data upon clicking camera preview
         camera_preview.setOnClickListener(view -> {
             video_recording.stop();
-            camera_provider.unbindAll();
             sensor_manager.unregisterListener(this);
             closeIMUDataOutputStream();
             // On emulator, videos are saved to /storage/emulated/0/Android/data/com.example.video_imu_recorder/files/DCIM
@@ -154,12 +157,7 @@ public class VideoRecord extends AppCompatActivity implements SensorEventListene
     }
 
     @OptIn(markerClass = ExperimentalCamera2Interop.class)
-    private void bindPreviewAndVideo(PreviewView camera_preview) {
-        // Prepare screen to display camera preview
-        Preview preview = new Preview.Builder().build();
-        CameraSelector camera_selector = new CameraSelector.Builder().requireLensFacing(CameraSelector.LENS_FACING_BACK).build();
-        preview.setSurfaceProvider(camera_preview.getSurfaceProvider());
-
+    private VideoCapture<Recorder> setUpVideoCapture(ProcessCameraProvider camera_provider) {
         // Find available image qualities for back camera
         CameraInfo back_camera_info = camera_provider.getAvailableCameraInfos().stream().filter(camera_info ->
                 Camera2CameraInfo.from(camera_info).getCameraCharacteristic(CameraCharacteristics.LENS_FACING) == CameraMetadata.LENS_FACING_BACK
@@ -172,11 +170,24 @@ public class VideoRecord extends AppCompatActivity implements SensorEventListene
         QualitySelector quality_selector = QualitySelector.from(available_qualities.findFirst().orElseThrow(NoSuchElementException::new));
         Recorder recorder = new Recorder.Builder().setExecutor(ContextCompat.getMainExecutor(this))
                 .setQualitySelector(quality_selector).build();
-        video_capture = VideoCapture.withOutput(recorder);
+        return VideoCapture.withOutput(recorder);
+    }
+
+    @OptIn(markerClass = {ExperimentalCamera2Interop.class, ExperimentalZeroShutterLag.class})
+    private void  bindPreviewAndVideo(ProcessCameraProvider camera_provider, PreviewView camera_preview) {
+        // Prepare screen to display camera preview
+        Preview preview = new Preview.Builder().build();
+        CameraSelector camera_selector = new CameraSelector.Builder().requireLensFacing(CameraSelector.LENS_FACING_BACK).build();
+        preview.setSurfaceProvider(camera_preview.getSurfaceProvider());
+
+        // Prepare both video recording and image taking objects
+        video_capture = setUpVideoCapture(camera_provider);
+        image_capture = new ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_ZERO_SHUTTER_LAG)
+                .setTargetRotation(camera_preview.getDisplay().getRotation()).build();
 
         // Connect camera preview and video capture to the application
         try {
-            camera_provider.bindToLifecycle(this, camera_selector, preview, video_capture);
+            camera_provider.bindToLifecycle(this, camera_selector, preview, video_capture, image_capture);
         } catch (IllegalArgumentException illegal_argument_exception) {
             Toast.makeText(this, "Failed to initialize camera", Toast.LENGTH_LONG).show();
             Log.e(CAM, "Preview or video capture use case binding failed");
@@ -185,12 +196,21 @@ public class VideoRecord extends AppCompatActivity implements SensorEventListene
     }
 
     private void startDataCollection(String video_name, String imu_data_name) throws IOException {
-        if (video_capture == null) throw new UnsupportedOperationException("VideoCapture instance must be non-null." +
-                " Did you try to start capturing before binding video capture to the activity lifecycle?");
+        if (video_capture == null || image_capture == null) throw new UnsupportedOperationException("VideoCapture and ImageCapture instances" +
+                " must be non-null. Did you try to start capturing before binding video capture to the activity lifecycle?");
         /*
         Create a new file to store IMU measurement data. Location (on emulator):
         /storage/emulated/0/Android/data/com.example.video_imu_recorder/files/Documents
         */
+        image_folder = new File(ContextCompat.getExternalFilesDirs(this, Environment.DIRECTORY_DCIM)[0],
+                video_name.substring(0, video_name.indexOf('.')));
+        if (image_folder.mkdir()) {
+            Log.d(CAM, "Image directory successfully created at " + image_folder.getAbsolutePath());
+        } else {
+            Toast.makeText(this, "No (new) folder was created for storing timestamped images", Toast.LENGTH_LONG).show();
+            Log.w(CAM, "Image directory wasn't created at " + image_folder.getAbsolutePath());
+        }
+
         imu_data = new File(ContextCompat.getExternalFilesDirs(this, Environment.DIRECTORY_DOCUMENTS)[0], imu_data_name);
         try {
             imu_data.createNewFile();
@@ -259,6 +279,23 @@ public class VideoRecord extends AppCompatActivity implements SensorEventListene
         }
     };
 
+
+    private void takeAndSavePicture(String image_name) {
+        ImageCapture.OutputFileOptions output_file_options = new ImageCapture.OutputFileOptions.Builder(new File(image_folder, image_name))
+                .build();
+        image_capture.takePicture(output_file_options, ContextCompat.getMainExecutor(this), new ImageCapture.OnImageSavedCallback() {
+            @Override
+            public void onImageSaved(@NonNull ImageCapture.OutputFileResults outputFileResults) {
+                Log.v(CAM, "Image saved to: " + outputFileResults.getSavedUri());
+            }
+
+            @Override
+            public void onError(@NonNull ImageCaptureException exception) {
+                Log.d(CAM, "Image failed to save: " + exception);
+            }
+        });
+    }
+
     private void broadcast_record_status(String status) {
         Log.i(CAM, "status to broadcast: " + status);
         Intent broadcast = new Intent();
@@ -276,6 +313,7 @@ public class VideoRecord extends AppCompatActivity implements SensorEventListene
         Log.v(FILE, "imu data: " + data);
         try {
             output_stream.write(data.getBytes(StandardCharsets.UTF_8));
+            // takeAndSavePicture(imu_time + ".png");
             // Calculate the time difference between the IMU starting and the camera starting
             if (video_imu_start_times[0] != -1 && video_imu_start_times[1] != -1) {
                 long latency = video_imu_start_times[1] - video_imu_start_times[0];

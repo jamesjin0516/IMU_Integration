@@ -8,7 +8,7 @@ android {
 
     defaultConfig {
         applicationId "com.example.video_imu_recorder"
-        minSdk 33
+        minSdk 31
         targetSdk 33
         versionCode 1
         versionName "1.0"
