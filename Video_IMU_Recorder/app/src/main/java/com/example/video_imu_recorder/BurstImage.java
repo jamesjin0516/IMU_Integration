@@ -2,8 +2,13 @@ package com.example.video_imu_recorder;
 
 import android.Manifest;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.ImageFormat;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
@@ -18,6 +23,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.os.SystemClock;
 import android.util.Log;
 import android.util.Size;
 import android.util.SparseIntArray;
@@ -31,44 +37,54 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 
-public class BurstImage extends AppCompatActivity {
+public class BurstImage extends AppCompatActivity implements SensorEventListener {
     private static final int CAMERA_PERMISSION = new SecureRandom().nextInt(100);
+    private static final String CAM = "Camera_configuration", FILE = "IMU_data_file";
     private HandlerThread callback_thread;
     private Handler callback_handler;
     private ImageReader image_reader;
     private CameraDevice camera_device;
+    private SensorManager sensor_manager;
+    private Sensor linear_accelerometer, gyroscope;
+    private File imu_data, images_directory;
+    private FileOutputStream imu_output;
+    private long[] video_imu_start_times = {-1, -1};
+    private long last_save_time = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_burst_image);
+        Intent intent = getIntent();
+        String[] file_names = {intent.getStringExtra("imu_data_name"), intent.getStringExtra("media_name")};
+        String back_camera_id = intent.getStringExtra("back_camera_id");
 
+        // Set up background thread to handle image capturing events
         callback_thread = new HandlerThread("camera_callback_thread");
         callback_thread.start();
         callback_handler = new Handler(callback_thread.getLooper());
+
+        sensor_manager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        linear_accelerometer = sensor_manager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION);
+        gyroscope = sensor_manager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
 
         SurfaceView preview = findViewById(R.id.preview);
         // Use a callback to ensure the preview element responsible for showing the camera footage is ready first
         preview.getHolder().addCallback(new SurfaceHolder.Callback() {
             @Override
             public void surfaceCreated(@NonNull SurfaceHolder holder) {
-                CameraManager camera_manager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
                 try {
-                    for (String camera_id : camera_manager.getCameraIdList()) {
-                        if (camera_manager.getCameraCharacteristics(camera_id).get(CameraCharacteristics.LENS_FACING)
-                                == CameraCharacteristics.LENS_FACING_BACK) {
-                            initiateCamera(camera_manager, camera_id, preview);
-                            break;
-                        }
-                    }
+                    initiateCamera((CameraManager) getSystemService(Context.CAMERA_SERVICE), back_camera_id, preview, file_names);
                 } catch (CameraAccessException exception) {
                     exception.printStackTrace();
                 }
@@ -79,15 +95,15 @@ public class BurstImage extends AppCompatActivity {
             public void surfaceDestroyed(@NonNull SurfaceHolder holder) {}
         });
 
-        preview.setOnClickListener(view -> {
-            finish();
-        });
+        preview.setOnClickListener(view -> finish());
     }
 
     @Override
-    protected void onDestroy() {
-        super.onDestroy();
+    protected void onStop() {
+        super.onStop();
+        broadcast_record_status(BurstImage.class.getName());
         camera_device.close();
+        stopIMURecording();
         callback_thread.quitSafely();
         try {
             callback_thread.join();
@@ -109,7 +125,7 @@ public class BurstImage extends AppCompatActivity {
         }
     }
 
-    private void initiateCamera(CameraManager camera_manager, String camera_id, SurfaceView preview) throws CameraAccessException {
+    private void initiateCamera(CameraManager camera_manager, String camera_id, SurfaceView preview, String[] file_names) throws CameraAccessException {
         // Use busy-waiting to ensure permission is granted before opening camera
         boolean pending = true;
         while (ContextCompat.checkSelfPermission(BurstImage.this, android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_DENIED) {
@@ -131,18 +147,19 @@ public class BurstImage extends AppCompatActivity {
             public void onOpened(@NonNull CameraDevice camera) {
                 camera_device = camera;
                 try {
+                    prepareDataStorage(file_names[0], file_names[1]);
                     configureCameraOutputs(preview);
-                } catch (CameraAccessException exception) {
+                } catch (CameraAccessException | IOException exception) {
                     exception.printStackTrace();
                 }
             }
             @Override
             public void onDisconnected(@NonNull CameraDevice camera) {
-                Log.w("Camera", "disconnected");
+                Log.w(CAM, "disconnected");
             }
             @Override
             public void onError(@NonNull CameraDevice camera, int error) {
-                Log.e("Camera", "Error with code: " + error);
+                Log.e(CAM, "Error with code: " + error);
             }
         };
 
@@ -160,11 +177,13 @@ public class BurstImage extends AppCompatActivity {
         CameraCaptureSession.StateCallback state_callback = new CameraCaptureSession.StateCallback() {
             @Override
             public void onConfigured(@NonNull CameraCaptureSession session) {
-                Toast.makeText(BurstImage.this, "Configuration succeeded", Toast.LENGTH_LONG).show();
                 image_reader.setOnImageAvailableListener(image_available_listener, callback_handler);
                 try {
+                    startIMURecording();
                     session.setRepeatingRequest(capture_request_builder.build(), null, null);
+                    Toast.makeText(BurstImage.this, "Configuration succeeded", Toast.LENGTH_LONG).show();
                 } catch (CameraAccessException exception) {
+                    Toast.makeText(BurstImage.this, "Image capturing request failed", Toast.LENGTH_LONG).show();
                     exception.printStackTrace();
                 }
             }
@@ -191,17 +210,106 @@ public class BurstImage extends AppCompatActivity {
         image_buffer.get(image_bytes);
         image.close();
 
-        File image_file = new File(ContextCompat.getExternalFilesDirs(this, Environment.DIRECTORY_DCIM)[0], timestamp + ".jpeg");
+        File image_file = new File(images_directory, timestamp + ".jpeg");
         try {
-            // Write the byte data into an image file
-            FileOutputStream file_output_stream = new FileOutputStream(image_file);
-            file_output_stream.write(image_bytes);
-            file_output_stream.flush();
-            file_output_stream.close();
+            // Write the byte data into the image file
+            FileOutputStream image_output = new FileOutputStream(image_file);
+            image_output.write(image_bytes);
+            image_output.flush();
+            image_output.close();
+            // // Note the start time of the recording in the imu data file
+            if (video_imu_start_times[0] == -1) {
+                imu_output.write((timestamp + " video recording started\n").getBytes(StandardCharsets.UTF_8));
+                video_imu_start_times[0] = timestamp;
+            }
         } catch (IOException exception) {
             exception.printStackTrace();
         }
+
+        // Close and re-open the FileOutputStream object every 3 seconds to avoid overwhelming file write buffer
+        long current_time = SystemClock.elapsedRealtimeNanos();
+        if ((current_time - last_save_time > 3 * Math.pow(10, 9))) {
+            last_save_time = current_time;
+            stopIMURecording();
+            startIMURecording();
+        }
     };
+
+    private void broadcast_record_status(String status) {
+        Log.i(CAM, "status to broadcast: " + status);
+        Intent broadcast = new Intent();
+        broadcast.setAction(getPackageName() + ".RECORD_STATUS");
+        broadcast.putExtra("status", status);
+        broadcast.setPackage(getPackageName());
+        sendBroadcast(broadcast);
+    }
+
+    @Override
+    public void onSensorChanged(SensorEvent event) {
+        long imu_time = SystemClock.elapsedRealtimeNanos();
+        if (video_imu_start_times[1] == -1) video_imu_start_times[1] = imu_time;
+        String data = imu_time + " " + event.sensor.getName() + " " + Arrays.toString(event.values) + '\n';
+        Log.v(FILE, "imu data: " + data);
+        try {
+            imu_output.write(data.getBytes(StandardCharsets.UTF_8));
+            // Calculate the time difference between the IMU starting and the camera starting
+            if (video_imu_start_times[0] > 0 && video_imu_start_times[1] > 0) {
+                long latency = video_imu_start_times[1] - video_imu_start_times[0];
+                imu_output.write(("Latency between IMU and camera: " + Math.abs(latency) + " (" + (latency < 0 ? "IMU" : "camera")
+                        + " started sooner)\n").getBytes(StandardCharsets.UTF_8));
+                Log.i(FILE, "Latency: " + latency);
+                video_imu_start_times = new long[]{0, 0};
+            }
+        } catch (IOException exception) {
+            exception.printStackTrace();
+        }
+    }
+
+    @Override
+    public void onAccuracyChanged(Sensor sensor, int accuracy) {
+        Log.v(FILE, sensor.getName() + " accuracy changed to " + accuracy);
+    }
+
+    private void prepareDataStorage(String imu_data_name, String media_name) throws IOException {
+        // Create a new file to store IMU measurement data
+        imu_data = new File(ContextCompat.getExternalFilesDirs(this, Environment.DIRECTORY_DOCUMENTS)[0], imu_data_name);
+        try {
+            Log.i(FILE, "IMU data file (new: " + imu_data.createNewFile() + "; exists: " + imu_data.exists() + ") at " + imu_data.getPath());
+        } catch (IOException io_exception) {
+            Log.e(FILE, "Creation failed: " + imu_data.getPath());
+            Toast.makeText(this, "IMU data storage file cannot be created", Toast.LENGTH_LONG).show();
+            throw io_exception;
+        }
+
+        // Create a new folder to store captured images
+        images_directory = new File(ContextCompat.getExternalFilesDirs(this, Environment.DIRECTORY_DCIM)[0], media_name);
+        Log.i(CAM, "Image directory (newly created: " + images_directory.mkdirs() + ") at " + images_directory.getAbsolutePath());
+    }
+
+    private void startIMURecording() {
+        try {
+            imu_output = new FileOutputStream(imu_data, true);
+            sensor_manager.registerListener(this, linear_accelerometer, SensorManager.SENSOR_DELAY_NORMAL);
+            sensor_manager.registerListener(this, gyroscope, SensorManager.SENSOR_DELAY_NORMAL);
+        } catch (FileNotFoundException exception) {
+            Log.e(FILE, "FileOutputStream failed to be opened");
+            exception.printStackTrace();
+            Toast.makeText(this, "IMU data storage file cannot be opened", Toast.LENGTH_LONG).show();
+            finish();
+        }
+    }
+
+    private void stopIMURecording() {
+        sensor_manager.unregisterListener(this);
+        try {
+            imu_output.flush();
+            imu_output.close();
+        } catch (IOException exception) {
+            Log.e(FILE, "FileOutputStream failed to close");
+            Toast.makeText(this, "IMU data failed to save, data lost!", Toast.LENGTH_SHORT).show();
+            exception.printStackTrace();
+        }
+    }
 
     // The option to capture a singular image per method call, currently not used
     private void captureImage(CameraDevice camera) throws CameraAccessException {
