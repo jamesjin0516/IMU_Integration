@@ -1,4 +1,4 @@
-package com.example.video_imu_recorder;
+package com.nyu.video_imu_recorder;
 
 import android.Manifest;
 import android.content.Context;

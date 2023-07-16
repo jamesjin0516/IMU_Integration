@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace 'com.nyu.video_imu_recorder'
+    namespace 'com.nyu.baseline'
     compileSdk 33
 
     defaultConfig {
-        applicationId "com.nyu.video_imu_recorder"
+        applicationId "com.nyu.baseline"
         minSdk 31
         targetSdk 33
         versionCode 1
@@ -31,13 +31,7 @@ android {
 dependencies {
 
     implementation 'androidx.appcompat:appcompat:1.6.1'
-    // CameraX core library using the camera2 implementation
-    def camerax_version = "1.2.3"
-    implementation "androidx.camera:camera-camera2:${camerax_version}"
-    implementation "androidx.camera:camera-lifecycle:${camerax_version}"
-    implementation "androidx.camera:camera-video:${camerax_version}"
-    implementation "androidx.camera:camera-view:${camerax_version}"
-    implementation 'com.google.android.material:material:1.8.0'
+    implementation 'com.google.android.material:material:1.9.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'

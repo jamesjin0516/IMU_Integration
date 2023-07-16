@@ -1,4 +1,4 @@
-package com.example.video_imu_recorder;
+package com.nyu.video_imu_recorder;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -53,7 +53,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /*
-    Currently, both imu and video data are stored under /sdcard/Android/data/com.example.video_imu_recorder
+    Currently, both imu and video data are stored under /sdcard/Android/data/com.nyu.video_imu_recorder
 
     The IMU data is stored under the following format (A more sophisticated tabular format is also possible in Android)
     <nano seconds elapsed since an external time instant> <sensor name> <[a comma-separated list with sensor data]>
