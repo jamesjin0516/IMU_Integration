@@ -1,16 +1,14 @@
 package com.nyu.baseline;
 
+import org.apache.commons.math3.complex.Quaternion;
+
 class CoordinateShift {
 
     static double[] rotationMatrix(double[] gravity, double[] norm_world_gravity) {
         double[] norm_gravity = normalized(gravity);
 
         // Use the cross product between gravity in the phone's vs. the world's coordinate frame
-        double[] cross_product = new double[3];
-        for (int comp = 1; comp < 4; ++comp) {
-            cross_product[comp - 1] = norm_world_gravity[comp % 3] * norm_gravity[(comp + 1) % 3] -
-                    norm_world_gravity[(comp + 1) % 3] * norm_gravity[comp % 3];
-        }
+        double[] cross_product = crossProduct(norm_world_gravity, norm_gravity);
 
         // The cross product avoids trigonometry and lessens computation
         double sinA = magnitude(cross_product);
@@ -42,12 +40,12 @@ class CoordinateShift {
         return transpose;
     }
 
-    static float[] axisAngleVector(double[] rotation, double dT) {
+    static float[] axisAngleVector(double[] angular_accel, double dT) {
         // Calculate the angular speed of the sample
-        double omegaMagnitude = CoordinateShift.magnitude(rotation);
+        double omegaMagnitude = CoordinateShift.magnitude(angular_accel);
         // Normalize the rotation vector if it's big enough to get the axis
         // (that is, EPSILON should represent your maximum allowable margin of error)
-        double[] norm_rotation = CoordinateShift.normalized(rotation);
+        double[] norm_rotation = CoordinateShift.normalized(angular_accel);
 
         // Integrate around this axis with the angular speed by the timestep
         // in order to get a delta rotation from this sample over the timestep
@@ -62,6 +60,33 @@ class CoordinateShift {
         }
         deltaRotationVector[3] = (float) cosThetaOverTwo;
         return deltaRotationVector;
+    }
+
+    static Quaternion newQuaternionPose(Quaternion last_pose, float[] acceleration, double[] angular_accel, double dT) {
+        double[] norm_acceleration = normalized(CoordinateShift.toDoubleArray(acceleration));
+        double q0 = last_pose.getQ0(), q1 = last_pose.getQ1(), q2 = last_pose.getQ2(), q3 = last_pose.getQ3();
+        // Estimated direction of gravity and magnetic flux
+        double[] approx_field = {2 * (q1 * q3 - q0 * q2), 2 * (q0 * q1 + q2 * q3), q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3};
+        // Error is sum of cross product between estimated direction and measured direction of field
+        double[] error = crossProduct(norm_acceleration, approx_field);
+        // Apply feedback terms
+        for (int index = 0; index < angular_accel.length; ++index) {
+            angular_accel[index] += error[index];
+        }
+        // Compute rate of change of quaternion
+        Quaternion delta_pose = last_pose.multiply(new Quaternion(angular_accel)).multiply(0.5);
+        // Integrate to yield quaternion
+        Quaternion new_pose = last_pose.add(delta_pose.multiply(dT));
+        return new_pose.normalize();
+    }
+
+    static double[] crossProduct(double[] vector1, double[] vector2) {
+        double[] cross_product = new double[3];
+        for (int comp = 1; comp < vector1.length + 1; ++comp) {
+            cross_product[comp - 1] = vector1[comp % 3] * vector2[(comp + 1) % 3] -
+                    vector1[(comp + 1) % 3] * vector2[comp % 3];
+        }
+        return cross_product;
     }
 
     static double magnitude(double[] vector) {
