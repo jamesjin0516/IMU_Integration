@@ -15,3 +15,4 @@ dependencyResolutionManagement {
 rootProject.name = "Video_IMU_Recorder"
 include ':app'
 include ':baseline'
+include ':imu_processing'

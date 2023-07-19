@@ -1,11 +1,12 @@
-package com.nyu.baseline;
+package com.nyu.imu_processing;
 
 import org.apache.commons.math3.complex.Quaternion;
 
-class CoordinateShift {
+public class CoordinateShift {
 
-    static double[] rotationMatrix(double[] gravity, double[] norm_world_gravity) {
+    static double[] rotationMatrix(double[] gravity, double[] world_gravity) {
         double[] norm_gravity = normalized(gravity);
+        double[] norm_world_gravity = normalized(world_gravity);
 
         // Use the cross product between gravity in the phone's vs. the world's coordinate frame
         double[] cross_product = crossProduct(norm_world_gravity, norm_gravity);
@@ -40,7 +41,7 @@ class CoordinateShift {
         return transpose;
     }
 
-    static float[] axisAngleVector(double[] angular_accel, double dT) {
+    static double[] axisAngleVector(double[] angular_accel, double dT) {
         // Calculate the angular speed of the sample
         double omegaMagnitude = CoordinateShift.magnitude(angular_accel);
         // Normalize the rotation vector if it's big enough to get the axis
@@ -54,11 +55,11 @@ class CoordinateShift {
         double thetaOverTwo = omegaMagnitude * dT / 2;
         double sinThetaOverTwo = Math.sin(thetaOverTwo);
         double cosThetaOverTwo = Math.cos(thetaOverTwo);
-        float[] deltaRotationVector = new float[4];
+        double[] deltaRotationVector = new double[4];
         for (int index = 0; index < 3; ++index) {
-            deltaRotationVector[index] = (float) (sinThetaOverTwo * norm_rotation[index]);
+            deltaRotationVector[index] = sinThetaOverTwo * norm_rotation[index];
         }
-        deltaRotationVector[3] = (float) cosThetaOverTwo;
+        deltaRotationVector[3] = cosThetaOverTwo;
         return deltaRotationVector;
     }
 
@@ -107,7 +108,7 @@ class CoordinateShift {
         return vector;
     }
 
-    static double[] toDoubleArray(float[] input) {
+    public static double[] toDoubleArray(float[] input) {
         double[] output = new double[input.length];
         for (int i = 0; i < input.length; ++i) output[i] = input[i];
         return output;

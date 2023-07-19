@@ -11,7 +11,7 @@
         android:layout_height="wrap_content"
         android:padding="20dp"
         android:text="@string/method_description"
-        app:layout_constraintBottom_toTopOf="@id/alignment_methods"
+        app:layout_constraintBottom_toTopOf="@id/method_selector"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
@@ -19,7 +19,7 @@
     <Spinner
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:id="@+id/alignment_methods"
+        android:id="@+id/method_selector"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintTop_toTopOf="parent"
