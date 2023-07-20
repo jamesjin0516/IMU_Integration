@@ -36,6 +36,9 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 
+import com.nyu.imu_processing.CoordinateShift;
+import com.nyu.imu_processing.IMUSession;
+
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
@@ -55,7 +58,10 @@ public class BurstImage extends AppCompatActivity implements SensorEventListener
     private ImageReader image_reader;
     private CameraDevice camera_device;
     private SensorManager sensor_manager;
-    private Sensor linear_accelerometer, gyroscope;
+    private Sensor accelerometer, gyroscope, gravity_sensor;
+    private final IMUSession imu_session = new IMUSession(new double[]{0, 0, SensorManager.GRAVITY_EARTH},
+            new String[]{"align_quaternion", "align_gravity"}, "align_gravity", 20000000);
+    private double[] gravity = {0, 0, 0};
     private File imu_data, images_directory;
     private FileOutputStream imu_output;
     private long[] video_imu_start_times = {-1, -1};
@@ -75,8 +81,9 @@ public class BurstImage extends AppCompatActivity implements SensorEventListener
         callback_handler = new Handler(callback_thread.getLooper());
 
         sensor_manager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
-        linear_accelerometer = sensor_manager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION);
+        accelerometer = sensor_manager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
         gyroscope = sensor_manager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
+        gravity_sensor = sensor_manager.getDefaultSensor(Sensor.TYPE_GRAVITY);
 
         SurfaceView preview = findViewById(R.id.preview);
         // Use a callback to ensure the preview element responsible for showing the camera footage is ready first
@@ -136,6 +143,8 @@ public class BurstImage extends AppCompatActivity implements SensorEventListener
         }
 
         // Get the back camera's highest resolution and use it to create the image reader
+        assert camera_manager.getCameraCharacteristics(camera_id).get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) == 1 : "The camera" +
+                " timestamps can't be guaranteed to match IMU timestamps";
         Size[] sizes = camera_manager.getCameraCharacteristics(camera_id)
                 .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP).getOutputSizes(ImageFormat.JPEG);
         final Size max_size = Arrays.stream(sizes).max(Comparator.comparing(size -> size.getWidth() * size.getHeight())).orElse(sizes[0]);
@@ -217,7 +226,7 @@ public class BurstImage extends AppCompatActivity implements SensorEventListener
             image_output.write(image_bytes);
             image_output.flush();
             image_output.close();
-            // // Note the start time of the recording in the imu data file
+            // Note the start time of the recording in the imu data file
             if (video_imu_start_times[0] == -1) {
                 imu_output.write((timestamp + " video recording started\n").getBytes(StandardCharsets.UTF_8));
                 video_imu_start_times[0] = timestamp;
@@ -246,22 +255,29 @@ public class BurstImage extends AppCompatActivity implements SensorEventListener
 
     @Override
     public void onSensorChanged(SensorEvent event) {
-        long imu_time = SystemClock.elapsedRealtimeNanos();
-        if (video_imu_start_times[1] == -1) video_imu_start_times[1] = imu_time;
-        String data = imu_time + " " + event.sensor.getName() + " " + Arrays.toString(event.values) + '\n';
+        String data = "";
+        if (video_imu_start_times[1] == -1) video_imu_start_times[1] = event.timestamp;
+        // Calculate the time difference between the IMU starting and the camera starting
+        if (video_imu_start_times[0] > 0 && video_imu_start_times[1] > 0) {
+            long latency = video_imu_start_times[1] - video_imu_start_times[0];
+            data += "Latency between IMU and camera: " + Math.abs(latency) + " (" + (latency < 0 ? "IMU" : "camera") + " started sooner)\n";
+            Log.i(FILE, "Latency: " + latency);
+            video_imu_start_times = new long[]{0, 0};
+        }
+        // Get processed data from alignment and integration algorithms etc. in imu session
+        if (event.sensor.getType() == gravity_sensor.getType()) {
+            gravity = CoordinateShift.toDoubleArray(event.values);
+        } else if (event.sensor.getType() == accelerometer.getType()) {
+            data += imu_session.updateAccelerometer(event.timestamp, event.values, gravity);
+        } else if (event.sensor.getType() == gyroscope.getType()) {
+            imu_session.updateGyroscope(event.timestamp, event.values);
+        }
+        // Write the combined output from this measurement to the data file
         Log.v(FILE, "imu data: " + data);
         try {
             imu_output.write(data.getBytes(StandardCharsets.UTF_8));
-            // Calculate the time difference between the IMU starting and the camera starting
-            if (video_imu_start_times[0] > 0 && video_imu_start_times[1] > 0) {
-                long latency = video_imu_start_times[1] - video_imu_start_times[0];
-                imu_output.write(("Latency between IMU and camera: " + Math.abs(latency) + " (" + (latency < 0 ? "IMU" : "camera")
-                        + " started sooner)\n").getBytes(StandardCharsets.UTF_8));
-                Log.i(FILE, "Latency: " + latency);
-                video_imu_start_times = new long[]{0, 0};
-            }
-        } catch (IOException exception) {
-            exception.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
 
@@ -289,8 +305,10 @@ public class BurstImage extends AppCompatActivity implements SensorEventListener
     private void startIMURecording() {
         try {
             imu_output = new FileOutputStream(imu_data, true);
-            sensor_manager.registerListener(this, linear_accelerometer, SensorManager.SENSOR_DELAY_NORMAL);
-            sensor_manager.registerListener(this, gyroscope, SensorManager.SENSOR_DELAY_NORMAL);
+            int interval = Math.max(Math.max(accelerometer.getMinDelay(), gyroscope.getMinDelay()), gravity_sensor.getMinDelay());
+            sensor_manager.registerListener(this, accelerometer, interval);
+            sensor_manager.registerListener(this, gyroscope, interval);
+            sensor_manager.registerListener(this, gravity_sensor, interval);
         } catch (FileNotFoundException exception) {
             Log.e(FILE, "FileOutputStream failed to be opened");
             exception.printStackTrace();

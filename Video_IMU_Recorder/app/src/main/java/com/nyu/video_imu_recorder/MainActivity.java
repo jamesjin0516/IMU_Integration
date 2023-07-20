@@ -47,7 +47,6 @@ public class MainActivity extends AppCompatActivity {
                     record_counter.setText(getString(R.string.count_designator, record_count));
                     Log.i(VID, "Incremented record_count, now at " + record_count);
                 }
-                unregisterReceiver(this);
             }
         }
     }
