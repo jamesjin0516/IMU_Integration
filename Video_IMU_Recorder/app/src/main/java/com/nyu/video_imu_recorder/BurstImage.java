@@ -228,7 +228,7 @@ public class BurstImage extends AppCompatActivity implements SensorEventListener
             image_output.close();
             // Note the start time of the recording in the imu data file
             if (video_imu_start_times[0] == -1) {
-                imu_output.write((timestamp + " video recording started\n").getBytes(StandardCharsets.UTF_8));
+                imu_output.write((timestamp + " video recording started. ").getBytes(StandardCharsets.UTF_8));
                 video_imu_start_times[0] = timestamp;
             }
         } catch (IOException exception) {

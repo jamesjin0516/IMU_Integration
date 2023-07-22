@@ -9,7 +9,8 @@ import yaml
 def configure_parser_and_parse():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_root", default="/home/unav/Desktop/UNav/", type=str, required=False)
-    parser.add_argument("--csv_locations", default="New_York_University,6_MetroTech,Metrotech_6_Floor_4_With_Stairs", type=str, required=False)
+    parser.add_argument("--csv_locations", default="New_York_University,6_MetroTech,Metrotech_6_Floor_4_With_Stairs",
+                        type=str, required=False)
     parser.add_argument("--floorplan_scale", default=0.01209306372, type=float, required=False)
     parser.add_argument("--port_id", type=int, required=False)
     return parser.parse_args()
@@ -27,12 +28,13 @@ def prepare_Hloc_socket(args):
         server_config = yaml.safe_load(f)
     with open(hloc_config_path, 'r') as f:
         hloc_config = yaml.safe_load(f)
-    
+
+    # Provide option for overriding location configuration using arguments
     location_keys = list(server_config["location"].keys())
     location_values = args.csv_locations.split(",") + [args.floorplan_scale]
     for key_ind in range(len(location_keys)):
         server_config["location"][location_keys[key_ind]] = location_values[key_ind]
-    
+
     map_data = loader.load_data(server_config)
     hloc = Hloc(args.data_root, map_data, hloc_config)
 
@@ -46,6 +48,7 @@ def prepare_Hloc_socket(args):
 
 def recvall(sock, count):
     buf = b''
+    # Keep using the socket to receive data until the remaining unreceived length decreases to 0
     while count:
         newbuf = sock.recv(count)
         if not newbuf:
@@ -61,13 +64,16 @@ def receive_images(hloc, sock):
     command = -1
 
     while (command):
+        # Use designated integer codes sent by the client to control actions
         command = int.from_bytes(recvall(sock, 4), "big")
         if command == 1:
+            # Receive the incoming image and decode it from bytes
             length = recvall(sock, 4)
             image_bytes = recvall(sock, int.from_bytes(length, 'big'))
             image_array = np.frombuffer(image_bytes, np.uint8)
             image = cv2.imdecode(image_array, cv2.IMREAD_UNCHANGED)
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            # Use created hierarchical localization instance to localize image and send result back
             pose = hloc.get_location(image)
             print(f"Pose: {pose}")
             pose = str(pose) if pose else "None"
@@ -77,6 +83,7 @@ def receive_images(hloc, sock):
             command = -1
 
     sock.close()
+
 
 if __name__ == "__main__":
     args = configure_parser_and_parse()
