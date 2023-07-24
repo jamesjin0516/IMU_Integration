@@ -20,11 +20,10 @@ public class IMUSession {
     private final String[] alignment_methods;
     private String alignment_method = "";
     private final long integration_interval;
-    private double[] linear_accel = {}, angular_accel = {0, 0, 0};
     private final ArrayList<Pair<Long, double[]>> accels_info = new ArrayList<>(), velos_info = new ArrayList<>(), poss_info = new ArrayList<>();
-    private final double[] velocity = {0, 0, 0}, position = {0, 0, 0}, turned_angle = {0, 0, 0};
+    private final double[] angular_accel = {0, 0, 0}, turned_angle = {0, 0, 0};
     private Quaternion pose = Quaternion.IDENTITY;
-    private long accel_timestamp = 0, gyro_timestamp = 0, integration_timestamp;
+    private long gyro_timestamp = 0, integration_timestamp;
 
     public IMUSession(double[] world_gravity, String[] alignment_methods, String alignment_method, int integration_interval) {
         this.world_gravity = world_gravity;
@@ -35,24 +34,14 @@ public class IMUSession {
 
     public String updateAccelerometer(long event_timestamp, float[] accel_values, double[] gravity) {
         // Transform the new acceleration readings into the world coordinate frame
-        final double dT = (event_timestamp - accel_timestamp) / NANOSECONDS;
+        final double dT = accels_info.size() == 0 ? 0 : (event_timestamp - accels_info.get(accels_info.size() - 1).getFirst()) / NANOSECONDS;
         double[] aligned_accel = alignAcceleration(accel_values, gravity, dT);
 
-        // Perform double integration of the new and old acceleration values using time gap between readings
-        for (int dim = 0; dim < linear_accel.length; ++dim) {
-            double delta_velocity = dT * (linear_accel[dim] + aligned_accel[dim]) / 2;
-            double delta_position = dT * dT * (aligned_accel[dim] + 2 * linear_accel[dim]) / 6 + dT * velocity[dim];
-
-            velocity[dim] += delta_velocity;
-            position[dim] += delta_position;
-        }
-
-        linear_accel = aligned_accel;
-        accel_timestamp = event_timestamp;
-
+        // Append to accelerations data and initialize velocities and positions data if necessary
         accels_info.add(new Pair<>(event_timestamp, aligned_accel));
         if (velos_info.size() == 0) velos_info.add(new Pair<>(accels_info.get(0).getFirst(), new double[]{0, 0, 0}));
         if (poss_info.size() == 0) poss_info.add(new Pair<>(accels_info.get(0).getFirst(), new double[]{0, 0, 0}));
+        // Once the specified duration has elapsed, do a bulk integration on all buffered accelerations data
         if (event_timestamp - integration_timestamp > integration_interval) {
             doubleIntegration();
             integration_timestamp = event_timestamp;
@@ -62,15 +51,18 @@ public class IMUSession {
     }
 
     private String generatePositionData() {
+        // Verify the same number of accelerations, velocities, and positions calculated for the same sequence of timestamps
         assert accels_info.size() == velos_info.size() && velos_info.size() == poss_info.size() : "Kinematic arrays are of different length";
         for (int index = 0; index < accels_info.size(); ++index) {
             assert Objects.equals(accels_info.get(index).getFirst(), velos_info.get(index).getFirst()) &&
                     Objects.equals(velos_info.get(index).getFirst(), poss_info.get(index).getFirst()) : "Timestamps are inconsistent across kinematic arrays";
         }
+        // Remove and remember the last values for each of the three quantities; also conveniently output the remaining positions
         Pair<Long, double[]> remain_pos = poss_info.remove(poss_info.size() - 1);
         List<String> output = poss_info.stream().flatMap(pos -> Stream.of(pos.getFirst() + " position " + Arrays.toString(pos.getSecond()) + '\n')).collect(Collectors.toList());
         Pair<Long, double[]> remain_accel = accels_info.remove(accels_info.size() - 1);
         Pair<Long, double[]> remain_velo = velos_info.remove(velos_info.size() - 1);
+        // Reset the last values as the first values (the reference for the next round of integration) for each quantity
         accels_info.clear();
         accels_info.add(remain_accel);
         velos_info.clear();
@@ -92,7 +84,7 @@ public class IMUSession {
             turned_angle[1] += Math.toDegrees(Math.atan2(-delta_rotation_matrix[2][0], CoordinateShift.magnitude(Arrays.copyOfRange(delta_rotation_matrix[2], 1, 3))));
             turned_angle[2] += Math.toDegrees(Math.atan2(delta_rotation_matrix[1][0], delta_rotation_matrix[0][0]));
         }
-        angular_accel = CoordinateShift.toDoubleArray(gyro_values);
+        System.arraycopy(CoordinateShift.toDoubleArray(gyro_values), 0, angular_accel, 0, angular_accel.length);
         gyro_timestamp = event_timestamp;
     }
 
@@ -147,9 +139,10 @@ public class IMUSession {
         double total_dT = (accels_info.get(accels_info.size() - 1).getFirst() - accels_info.get(0).getFirst()) / NANOSECONDS;
         double avg_dT = total_dT / (accels_info.size() - 1);
 
+        // For every acceleration value after the last integrated velocity, perform integration with itself and previous acceleration
         for (int index = velos_info.size(); index < accels_info.size(); ++index) {
             double[] prev_velo = velos_info.get(velos_info.size() - 1).getSecond(), new_velo = new double[3];
-            double dT = (accels_info.get(index).getFirst() - accels_info.get(index - 1).getFirst()) / NANOSECONDS;
+            final double dT = (accels_info.get(index).getFirst() - accels_info.get(index - 1).getFirst()) / NANOSECONDS;
             double[] curr_accel = accels_info.get(index).getSecond(), prev_accel = accels_info.get(index - 1).getSecond();
             for (int dim = 0; dim < curr_accel.length; ++dim) {
                 double delta_velocity = dT * (prev_accel[dim] + curr_accel[dim]) / 2;
@@ -161,9 +154,10 @@ public class IMUSession {
 
         // filterQuantity(velos_info, avg_dT);
 
+        // For every acceleration value after the last integrated position, perform second integration with its corresponding velocity as well
         for (int index = poss_info.size(); index < accels_info.size(); ++index) {
             double[] prev_pos = poss_info.get(poss_info.size() - 1).getSecond(), new_pos = new double[3];
-            double dT = (accels_info.get(index).getFirst() - accels_info.get(index - 1).getFirst()) / NANOSECONDS;
+            final double dT = (accels_info.get(index).getFirst() - accels_info.get(index - 1).getFirst()) / NANOSECONDS;
             double[] curr_accel = accels_info.get(index).getSecond(), prev_accel = accels_info.get(index - 1).getSecond();
             double[] prev_velo = velos_info.get(index - 1).getSecond();
             for (int dim = 0; dim < curr_accel.length; ++dim) {

@@ -1,42 +1,43 @@
 import argparse
-import cv2
-import numpy as np
 import socket
 import sys
+
+import cv2
+import numpy as np
 import yaml
 
 
 def configure_parser_and_parse():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_root", default="/home/unav/Desktop/UNav/", type=str, required=False)
-    parser.add_argument("--csv_locations", default="New_York_University,6_MetroTech,Metrotech_6_Floor_4_With_Stairs",
-                        type=str, required=False)
-    parser.add_argument("--floorplan_scale", default=0.01209306372, type=float, required=False)
+    parser.add_argument("--server_dir", default=None, type=str, required=False)
+    parser.add_argument("--csv_locations", default=None, type=str, required=False)
+    parser.add_argument("--floorplan_scale", default=None, type=float, required=False)
     parser.add_argument("--port_id", type=int, required=False)
     return parser.parse_args()
 
 
 def prepare_Hloc_socket(args):
-    sys.path.append(args.data_root + "src")
-    import loader
-    from track import Hloc
-
-    server_config_path = args.data_root + "configs/server.yaml"
-    hloc_config_path = args.data_root + "configs/hloc.yaml"
-
+    server_config_path = "localization.yaml"
     with open(server_config_path, 'r') as f:
         server_config = yaml.safe_load(f)
+    server_dir = args.server_dir if args.server_dir else server_config["server_dir"]
+    hloc_config_path = server_dir + "configs/hloc.yaml"
     with open(hloc_config_path, 'r') as f:
         hloc_config = yaml.safe_load(f)
 
+    sys.path.append(server_dir + "src")
+    import loader
+    from track import Hloc
+
     # Provide option for overriding location configuration using arguments
     location_keys = list(server_config["location"].keys())
-    location_values = args.csv_locations.split(",") + [args.floorplan_scale]
+    location_values = args.csv_locations.split(",") if args.csv_locations else [None] * 3
+    location_values += [args.floorplan_scale] if args.floorplan_scale else [None]
     for key_ind in range(len(location_keys)):
-        server_config["location"][location_keys[key_ind]] = location_values[key_ind]
+        if location_values[key_ind]: server_config["location"][location_keys[key_ind]] = location_values[key_ind]
 
     map_data = loader.load_data(server_config)
-    hloc = Hloc(args.data_root, map_data, hloc_config)
+    hloc = Hloc(server_dir, map_data, hloc_config)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.bind((server_config["server"]["host"], args.port_id if args.port_id else server_config["server"]["port"]))
@@ -63,7 +64,7 @@ def receive_images(hloc, sock):
     print("Socket accepted connection")
     command = -1
 
-    while (command):
+    while command:
         # Use designated integer codes sent by the client to control actions
         command = int.from_bytes(recvall(sock, 4), "big")
         if command == 1:

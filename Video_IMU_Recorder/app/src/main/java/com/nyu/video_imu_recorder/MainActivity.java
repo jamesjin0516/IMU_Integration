@@ -113,8 +113,7 @@ public class MainActivity extends AppCompatActivity {
     private Pair<String, String> generateFileNames(int record_count) {
         SimpleDateFormat date_format = new SimpleDateFormat("MMM_dd_yyyy", Locale.US);
         String date = date_format.format(new Date());
-        String media_name = date + "_media_" + record_count;
-        // TODO: migrate to a more organized format such as csv
+        String media_name = date + "_IMU_data_" + record_count;
         String imu_data_name = date + "_IMU_data_" + record_count + ".txt";
         return new Pair<>(media_name, imu_data_name);
     }

@@ -60,7 +60,7 @@ public class BurstImage extends AppCompatActivity implements SensorEventListener
     private SensorManager sensor_manager;
     private Sensor accelerometer, gyroscope, gravity_sensor;
     private final IMUSession imu_session = new IMUSession(new double[]{0, 0, SensorManager.GRAVITY_EARTH},
-            new String[]{"align_quaternion", "align_gravity"}, "align_gravity", 20000000);
+            new String[]{"align_quaternion", "align_gravity"}, "align_quaternion", 20000000);
     private double[] gravity = {0, 0, 0};
     private File imu_data, images_directory;
     private FileOutputStream imu_output;
@@ -177,7 +177,7 @@ public class BurstImage extends AppCompatActivity implements SensorEventListener
 
     private void configureCameraOutputs(SurfaceView preview) throws CameraAccessException {
         // Package the camera data destinations (device screen and image reader) into a capture request
-        CaptureRequest.Builder capture_request_builder = camera_device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
+        CaptureRequest.Builder capture_request_builder = camera_device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
         Surface surface = preview.getHolder().getSurface();
         capture_request_builder.addTarget(surface);
         capture_request_builder.addTarget(image_reader.getSurface());
