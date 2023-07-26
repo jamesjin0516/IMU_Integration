@@ -3,11 +3,11 @@ plugins {
 }
 
 android {
-    namespace 'com.example.video_imu_recorder'
+    namespace 'com.nyu.video_imu_recorder'
     compileSdk 33
 
     defaultConfig {
-        applicationId "com.example.video_imu_recorder"
+        applicationId "com.nyu.video_imu_recorder"
         minSdk 31
         targetSdk 33
         versionCode 1

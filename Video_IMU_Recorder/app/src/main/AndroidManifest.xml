@@ -18,7 +18,7 @@
         android:theme="@style/Theme.Video_IMU_Recorder"
         tools:targetApi="31">
         <activity
-            android:name=".BurstImage"
+            android:name="com.nyu.video_imu_recorder.BurstImage"
             android:exported="false"
             android:screenOrientation="landscape"
             android:theme="@style/Theme.AppCompat.NoActionBar">
@@ -38,7 +38,7 @@
         </provider>
 
         <activity
-            android:name=".MainActivity"
+            android:name="com.nyu.video_imu_recorder.MainActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -52,7 +52,7 @@
         </activity>
 
         <activity
-            android:name=".VideoRecord"
+            android:name="com.nyu.video_imu_recorder.VideoRecord"
             android:exported="false"
             android:screenOrientation="landscape"
             android:theme="@style/Theme.AppCompat.NoActionBar">
