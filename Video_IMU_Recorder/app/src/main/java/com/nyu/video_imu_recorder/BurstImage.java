@@ -30,6 +30,8 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
 
+import com.nyu.localization_service.ServerSession;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -38,6 +40,7 @@ import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
 
 public class BurstImage extends IMUCapture {
     private static final int CAMERA_PERMISSION = new SecureRandom().nextInt(100);
@@ -46,6 +49,7 @@ public class BurstImage extends IMUCapture {
     private Handler callback_handler;
     private ImageReader image_reader;
     private CameraDevice camera_device;
+    private ServerSession server_session;
     private File images_directory;
     private long last_save_time = 0;
 
@@ -56,6 +60,10 @@ public class BurstImage extends IMUCapture {
         Intent intent = getIntent();
         String[] file_names = {intent.getStringExtra("imu_data_name"), intent.getStringExtra("media_name")};
         String back_camera_id = intent.getStringExtra("back_camera_id");
+        // Establish communication with localization server
+        String host_id = intent.getStringExtra("host_id");
+        int port_id = Integer.parseInt(intent.getStringExtra("port_id"));
+        server_session = new ServerSession(host_id, port_id, getApplication());
 
         // Set up background thread to handle image capturing events
         callback_thread = new HandlerThread("camera_callback_thread");
@@ -91,7 +99,8 @@ public class BurstImage extends IMUCapture {
         callback_thread.quitSafely();
         try {
             callback_thread.join();
-        } catch (InterruptedException exception) {
+            server_session.shutdown();
+        } catch (InterruptedException | ExecutionException exception) {
             exception.printStackTrace();
         }
     }
@@ -203,7 +212,12 @@ public class BurstImage extends IMUCapture {
             image_output.close();
             // Note the start time of the recording in the imu data file
             notifyVideoStart(timestamp);
-        } catch (IOException exception) {
+            // Dispatch a localization request using the newly captured image
+            String pose = server_session.requestLocalization(image_bytes);
+            if (pose != null) {
+                Log.i(CAM, "localized pose: " + pose);
+            }
+        } catch (IOException | ExecutionException | InterruptedException exception) {
             exception.printStackTrace();
         }
 

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <EditTextPreference
+        android:key="host_id"
+        android:title="IP address"
+        android:summary="Specifies the server to perform localization"
+        android:defaultValue="128.122.136.173" />
+
+    <EditTextPreference
+        android:key="port_id"
+        android:title="port number"
+        android:summary="Specifies port to use to connect to server"
+        android:defaultValue="30001" />
+
+</PreferenceScreen>
