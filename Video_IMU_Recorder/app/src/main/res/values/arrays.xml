@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <array name="alignment_methods_descriptions">
+        <item>Estimate orientation change from gyroscope and accelerometer (constrained x and y axes)</item>
+        <item>Compare phone\'s measured gravity and world\'s gravity (dynamic x and y axes)</item>
+    </array>
+    <array name="alignment_methods">
+        <item>align_quaternion</item>
+        <item>align_gravity</item>
+    </array>
+</resources>

@@ -29,6 +29,7 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
+import androidx.preference.PreferenceManager;
 
 import com.nyu.localization_service.ServerSession;
 
@@ -61,8 +62,8 @@ public class BurstImage extends IMUCapture {
         String[] file_names = {intent.getStringExtra("imu_data_name"), intent.getStringExtra("media_name")};
         String back_camera_id = intent.getStringExtra("back_camera_id");
         // Establish communication with localization server
-        String host_id = intent.getStringExtra("host_id");
-        int port_id = Integer.parseInt(intent.getStringExtra("port_id"));
+        String host_id = PreferenceManager.getDefaultSharedPreferences(this).getString("host_id", null);
+        int port_id = Integer.parseInt(PreferenceManager.getDefaultSharedPreferences(this).getString("port_id", null));
         server_session = new ServerSession(host_id, port_id, getApplication());
 
         // Set up background thread to handle image capturing events
@@ -93,7 +94,7 @@ public class BurstImage extends IMUCapture {
     @Override
     protected void onStop() {
         super.onStop();
-        broadcast_record_status(BurstImage.class.getName());
+        broadcastRecordStatus(BurstImage.class.getName());
         camera_device.close();
         stopIMURecording();
         callback_thread.quitSafely();
@@ -129,6 +130,8 @@ public class BurstImage extends IMUCapture {
         }
 
         // Get the back camera's highest resolution and use it to create the image reader
+        assert camera_manager.getCameraCharacteristics(camera_id).get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) == 1 : "The camera" +
+                " timestamps can't be guaranteed to match IMU timestamps";
         Size[] sizes = camera_manager.getCameraCharacteristics(camera_id)
                 .get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP).getOutputSizes(ImageFormat.JPEG);
         final Size max_size = Arrays.stream(sizes).max(Comparator.comparing(size -> size.getWidth() * size.getHeight())).orElse(sizes[0]);
@@ -161,7 +164,7 @@ public class BurstImage extends IMUCapture {
 
     private void configureCameraOutputs(SurfaceView preview) throws CameraAccessException {
         // Package the camera data destinations (device screen and image reader) into a capture request
-        CaptureRequest.Builder capture_request_builder = camera_device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
+        CaptureRequest.Builder capture_request_builder = camera_device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
         Surface surface = preview.getHolder().getSurface();
         capture_request_builder.addTarget(surface);
         capture_request_builder.addTarget(image_reader.getSurface());

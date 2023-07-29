@@ -176,7 +176,7 @@ public class VideoRecord extends IMUCapture implements CameraXConfig.Provider {
             } else {
                 Toast.makeText(this, "Recording success", Toast.LENGTH_SHORT).show();
             }
-            broadcast_record_status(final_message);
+            broadcastRecordStatus(final_message);
             Log.i(CAM, "Video path: " + finalize_event.getOutputResults().getOutputUri().getPath());
             return;
         }

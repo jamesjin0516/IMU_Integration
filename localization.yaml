@@ -1,0 +1,31 @@
+location: 
+ place: New_York_University
+ building: 6_MetroTech
+ floor: Metrotech_6_Floor_4_With_Stairs
+ scale: 0.01209306372
+
+server:
+  host: "128.122.136.173"
+  port: 30001
+  feedback_freq: 0.1
+  FEC: false
+  DEBUG: true
+  INFERENCE: false
+  encoding: "h265"
+  sink_type: "video"
+
+IO_root: "/mnt/data/UNav-IO"
+server_dir: /home/unav/Desktop/UNav/
+data_name: Jul_24_2023_IMU_data_1
+
+IMU_regex:
+ timestamp: '[ 0-9 ]+'
+ # The "timestamp" regex will only search at the start of the string of IMU data as per current in-code implementation
+ type: '(?<= )[ a-zA-Z0-9 ]+(?= )'
+ values: '(?<=\[)[-0-9.eE, ]+(?=])'
+ # The "values" regex should grab all (three) dimensions as comma-separated string
+
+# This describes the device's orientation from the floorplan's perspective; the "x" and "y" keys represent matrix columns
+IMU_transform:
+ x: [-1, 0]
+ y: [0, 1]

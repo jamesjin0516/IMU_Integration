@@ -55,7 +55,7 @@ public class ServerSession {
             // Decode the byte array of the image as a bitmap, resize it, and re-encode it as a byte array
             Bitmap image = BitmapFactory.decodeByteArray(image_bytes, 0, image_bytes.length);
             Matrix scale = new Matrix();
-            scale.postScale(640 / (float) image.getHeight(), 640 / (float) image.getHeight());
+            scale.postScale(640 / (float) image.getWidth(), 640 / (float) image.getWidth());
             Bitmap resized_image = Bitmap.createBitmap(image, 0, 0, image.getWidth(), image.getHeight(), scale, true);
             ByteArrayOutputStream image_stream = new ByteArrayOutputStream();
             resized_image.compress(Bitmap.CompressFormat.JPEG, 100, image_stream);

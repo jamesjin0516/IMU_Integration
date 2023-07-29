@@ -13,4 +13,11 @@
         android:summary="Specifies port to use to connect to server"
         android:defaultValue="30001" />
 
+    <DropDownPreference
+        android:key="alignment_method"
+        android:title="Coordinate alignment"
+        android:summary="Means of transforming the phone's coordinate system to the world's"
+        android:entries="@array/alignment_methods_descriptions"
+        android:entryValues="@array/alignment_methods" />
+
 </PreferenceScreen>

@@ -21,7 +21,6 @@ import androidx.appcompat.widget.SwitchCompat;
 import androidx.camera.video.VideoRecordEvent;
 import androidx.core.content.ContextCompat;
 import androidx.preference.PreferenceFragmentCompat;
-import androidx.preference.PreferenceManager;
 
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
@@ -50,7 +49,7 @@ public class MainActivity extends AppCompatActivity {
                     record_counter.setText(getString(R.string.count_designator, record_count));
                     Log.i(VID, "Incremented record_count, now at " + record_count);
                 }
-                unregisterReceiver(this);
+                safeUnregisterReceiver();
             }
         }
     }
@@ -76,8 +75,6 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        String host_id = PreferenceManager.getDefaultSharedPreferences(this).getString("host_id", null);
-        String port_id = PreferenceManager.getDefaultSharedPreferences(this).getString("port_id", null);
 
         // Prepare for launching data capturing activity
         SwitchCompat record_mode = findViewById(R.id.record_mode);
@@ -95,9 +92,6 @@ public class MainActivity extends AppCompatActivity {
                 Pair<String, String> file_names = generateFileNames(record_count);
                 launch_record.putExtra("media_name", file_names.first);
                 launch_record.putExtra("imu_data_name", file_names.second);
-                // Provide host and port ids to the launched activity
-                launch_record.putExtra("host_id", host_id);
-                launch_record.putExtra("port_id", port_id);
                 startActivity(launch_record);
             } catch (CameraAccessException exception) {
                 Toast.makeText(this, "The device does not have a usable back camera for recording.", Toast.LENGTH_LONG).show();
@@ -129,8 +123,7 @@ public class MainActivity extends AppCompatActivity {
     private Pair<String, String> generateFileNames(int record_count) {
         SimpleDateFormat date_format = new SimpleDateFormat("MMM_dd_yyyy", Locale.US);
         String date = date_format.format(new Date());
-        String media_name = date + "_media_" + record_count;
-        // TODO: migrate to a more organized format such as csv
+        String media_name = date + "_IMU_data_" + record_count;
         String imu_data_name = date + "_IMU_data_" + record_count + ".txt";
         return new Pair<>(media_name, imu_data_name);
     }
@@ -145,6 +138,14 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        unregisterReceiver(record_status_receiver);
+        safeUnregisterReceiver();
+    }
+
+    private void safeUnregisterReceiver() {
+        // Rely on the fact that once the receiver is unregistered, it will be set to null
+        if (record_status_receiver != null) {
+            unregisterReceiver(record_status_receiver);
+            record_status_receiver = null;
+        }
     }
 }
