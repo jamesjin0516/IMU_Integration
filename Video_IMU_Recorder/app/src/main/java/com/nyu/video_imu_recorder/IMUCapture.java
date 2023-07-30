@@ -40,6 +40,7 @@ public abstract class IMUCapture extends AppCompatActivity implements SensorEven
     private double[] gravity = {0, 0, 0};
     private File imu_data;
     private FileOutputStream imu_output;
+    private final StringBuffer new_data_buffer = new StringBuffer();
     private long imu_start_time = -1;
 
     @Override
@@ -49,8 +50,7 @@ public abstract class IMUCapture extends AppCompatActivity implements SensorEven
         String[] alignment_methods = getResources().getStringArray(R.array.alignment_methods);
         String alignment_method = PreferenceManager.getDefaultSharedPreferences(this)
                 .getString("alignment_method", null);
-        imu_session = new IMUSession(new double[]{0, 0, SensorManager.GRAVITY_EARTH}, alignment_methods, alignment_method,
-                20000000);
+        imu_session = new IMUSession(new double[]{0, 0, SensorManager.GRAVITY_EARTH}, alignment_methods, alignment_method);
 
         sensor_manager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         accelerometer = sensor_manager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
@@ -68,21 +68,21 @@ public abstract class IMUCapture extends AppCompatActivity implements SensorEven
                 notifyAll();
             }
         }
-        // Get processed data from alignment and integration algorithms etc. in imu session
-        String data = "";
+        // Feed data to imu session for integration and other processing
         if (event.sensor.getType() == gravity_sensor.getType()) {
             gravity = CoordinateShift.toDoubleArray(event.values);
         } else if (event.sensor.getType() == accelerometer.getType()) {
             imu_session.updateAccelerometer(event.timestamp, event.values, gravity);
-            data += generatePositionData().getFirst();
         } else if (event.sensor.getType() == gyroscope.getType()) {
             imu_session.updateGyroscope(event.timestamp, event.values);
         }
-        data += imu_time + " " + event.sensor.getName() + " " + Arrays.toString(event.values) + '\n';
         // Write the combined output from this measurement to the data file
+        StringBuilder data = new StringBuilder(new_data_buffer.toString());
+        new_data_buffer.delete(0, new_data_buffer.length());
+        data.append(imu_time).append(' ').append(event.sensor.getName()).append(' ').append(Arrays.toString(event.values)).append('\n');
         Log.v(FILE, "imu data: " + data);
         try {
-            imu_output.write(data.getBytes(StandardCharsets.UTF_8));
+            imu_output.write(data.toString().getBytes(StandardCharsets.UTF_8));
         } catch (IOException exception) {
             exception.printStackTrace();
         }
@@ -143,13 +143,14 @@ public abstract class IMUCapture extends AppCompatActivity implements SensorEven
         }).start();
     }
 
-    protected Pair<String, List<Pair<Long, double[]>>> generatePositionData() {
-        // Get positions data and convert it into the timestamp type and values format
+    protected List<Pair<Long, double[]>> generatePositionData() {
+        // Get positions data and convert it into the timestamp + type + values format
         List<Pair<Long, double[]>> poss_info = imu_session.retrieveKinematicArrays().get("poss_info");
         assert poss_info != null : "The kinematics arrays either doesn't contain positions data or explicitly sets it to null";
         List<String> poss_output = poss_info.stream().flatMap(pos -> Stream.of(pos.getFirst() + " position "
                 + Arrays.toString(pos.getSecond()) + '\n')).collect(Collectors.toList());
-        return new Pair<>(String.join("", poss_output), poss_info);
+        new_data_buffer.append(String.join("", poss_output));
+        return poss_info;
     }
 
     protected void broadcastRecordStatus(String status) {

@@ -61,7 +61,6 @@ public class MainActivity extends AppCompatActivity {
     <nano seconds elapsed since an external time instant> <sensor name> <[a comma-separated list with sensor data]>
     Example:
     1578699792815 Goldfish 3-axis Gyroscope [0.0, 0.0, 0.0]
-    TODO: try to set IMU sensor sampling period close to camera frame rate
     */
 
     public static class ServerPreferenceFragment extends PreferenceFragmentCompat {

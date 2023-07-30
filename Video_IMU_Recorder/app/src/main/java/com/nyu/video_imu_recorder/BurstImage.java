@@ -216,10 +216,8 @@ public class BurstImage extends IMUCapture {
             // Note the start time of the recording in the imu data file
             notifyVideoStart(timestamp);
             // Dispatch a localization request using the newly captured image
-            String pose = server_session.requestLocalization(image_bytes);
-            if (pose != null) {
-                Log.i(CAM, "localized pose: " + pose);
-            }
+            String pose = server_session.requestLocalization(timestamp, image_bytes, generatePositionData());
+            if (pose != null) Log.i(CAM, "localized pose: " + pose);
         } catch (IOException | ExecutionException | InterruptedException exception) {
             exception.printStackTrace();
         }

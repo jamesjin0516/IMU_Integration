@@ -185,6 +185,7 @@ public class VideoRecord extends IMUCapture implements CameraXConfig.Provider {
         long current_time = video_record_event.getRecordingStats().getRecordedDurationNanos();
         if ((current_time - last_save_time > 3 * Math.pow(10, 9))) {
             last_save_time = current_time;
+            generatePositionData();
             stopIMURecording();
             startIMURecording();
         }

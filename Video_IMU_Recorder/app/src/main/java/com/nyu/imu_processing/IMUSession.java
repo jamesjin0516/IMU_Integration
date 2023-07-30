@@ -19,48 +19,45 @@ public class IMUSession {
     private final double[] world_gravity;
     private final String[] alignment_methods;
     private final String alignment_method;
-    private final long integration_interval;
     private final ArrayList<Pair<Long, double[]>> accels_info = new ArrayList<>(), velos_info = new ArrayList<>(), poss_info = new ArrayList<>();
     private final double[] angular_accel = {0, 0, 0}, turned_angle = {0, 0, 0};
     private Quaternion pose = Quaternion.IDENTITY;
-    private long gyro_timestamp = 0, integration_timestamp;
+    private long gyro_timestamp = 0;
 
-    public IMUSession(double[] world_gravity, String[] alignment_methods, String alignment_method, int integration_interval) {
+    public IMUSession(double[] world_gravity, String[] alignment_methods, String alignment_method) {
         this.world_gravity = world_gravity;
         this.alignment_methods = alignment_methods;
         this.alignment_method = alignment_method;
-        this.integration_interval = integration_interval;
     }
 
     public void updateAccelerometer(long event_timestamp, float[] accel_values, double[] gravity) {
-        // Transform the new acceleration readings into the world coordinate frame
-        final double dT = accels_info.size() == 0 ? 0 : (event_timestamp - accels_info.get(accels_info.size() - 1).getFirst()) / NANOSECONDS;
-        double[] aligned_accel = alignAcceleration(accel_values, gravity, dT);
-
-        // Append to accelerations data and initialize velocities and positions data if necessary
-        accels_info.add(new Pair<>(event_timestamp, aligned_accel));
-        if (velos_info.size() == 0) velos_info.add(new Pair<>(accels_info.get(0).getFirst(), new double[]{0, 0, 0}));
-        if (poss_info.size() == 0) poss_info.add(new Pair<>(accels_info.get(0).getFirst(), new double[]{0, 0, 0}));
-        // Once the specified duration has elapsed, do a bulk integration on all buffered accelerations data
-        if (event_timestamp - integration_timestamp > integration_interval) {
-            doubleIntegration();
-            integration_timestamp = event_timestamp;
+        synchronized (this) {
+            // Transform the new acceleration readings into the world coordinate frame
+            final double dT = accels_info.size() == 0 ? 0 : (event_timestamp - accels_info.get(accels_info.size() - 1).getFirst()) / NANOSECONDS;
+            double[] aligned_accel = alignAcceleration(accel_values, gravity, dT);
+            // Append to accelerations data and initialize velocities and positions data if necessary
+            accels_info.add(new Pair<>(event_timestamp, aligned_accel));
+            if (velos_info.size() == 0) velos_info.add(new Pair<>(accels_info.get(0).getFirst(), new double[]{0, 0, 0}));
+            if (poss_info.size() == 0) poss_info.add(new Pair<>(accels_info.get(0).getFirst(), new double[]{0, 0, 0}));
         }
     }
 
     public Map<String, List<Pair<Long, double[]>>> retrieveKinematicArrays() {
-        // Map all three kinematic arrays while excluding each array's last value
-        int last_index = poss_info.size() - 1;
-        Map<String, List<Pair<Long, double[]>>> result = Map.ofEntries(
-                new AbstractMap.SimpleImmutableEntry<>("accels_info", List.copyOf(accels_info.subList(0, last_index))),
-                new AbstractMap.SimpleImmutableEntry<>("velos_info", List.copyOf(velos_info.subList(0, last_index))),
-                new AbstractMap.SimpleImmutableEntry<>("poss_info", List.copyOf(poss_info.subList(0, last_index)))
-        );
-        // Delete all values from each array except for the last value
-        accels_info.subList(0, last_index).clear();
-        velos_info.subList(0, last_index).clear();
-        poss_info.subList(0, last_index).clear();
-        return result;
+        synchronized (this) {
+            doubleIntegration();
+            // Map all three kinematic arrays while excluding each array's last value
+            int last_index = poss_info.size() - 1;
+            Map<String, List<Pair<Long, double[]>>> result = Map.ofEntries(
+                    new AbstractMap.SimpleImmutableEntry<>("accels_info", List.copyOf(accels_info.subList(0, last_index))),
+                    new AbstractMap.SimpleImmutableEntry<>("velos_info", List.copyOf(velos_info.subList(0, last_index))),
+                    new AbstractMap.SimpleImmutableEntry<>("poss_info", List.copyOf(poss_info.subList(0, last_index)))
+            );
+            // Delete all values from each array except for the last value
+            accels_info.subList(0, last_index).clear();
+            velos_info.subList(0, last_index).clear();
+            poss_info.subList(0, last_index).clear();
+            return result;
+        }
     }
 
     public void updateGyroscope(long event_timestamp, float[] gyro_values) {
