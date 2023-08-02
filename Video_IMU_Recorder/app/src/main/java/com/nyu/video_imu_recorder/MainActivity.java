@@ -21,7 +21,12 @@ import androidx.appcompat.widget.SwitchCompat;
 import androidx.camera.video.VideoRecordEvent;
 import androidx.core.content.ContextCompat;
 import androidx.preference.PreferenceFragmentCompat;
+import androidx.preference.PreferenceManager;
 
+import java.io.DataOutputStream;
+import java.io.File;
+import java.io.IOException;
+import java.net.Socket;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Date;
@@ -32,6 +37,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String VID = "Recording_logistics";
     private RecordStatusReceiver record_status_receiver;
     private static int record_count = 1;
+    private boolean stop_server_upon_quit = false;
 
     public class RecordStatusReceiver extends BroadcastReceiver {
         @Override
@@ -49,6 +55,7 @@ public class MainActivity extends AppCompatActivity {
                     record_counter.setText(getString(R.string.count_designator, record_count));
                     Log.i(VID, "Incremented record_count, now at " + record_count);
                 }
+                if (source.equals(BurstImage.class.getName())) stop_server_upon_quit = true;
                 safeUnregisterReceiver();
             }
         }
@@ -84,6 +91,7 @@ public class MainActivity extends AppCompatActivity {
             IntentFilter filter = new IntentFilter(getPackageName() + ".RECORD_STATUS");
             ContextCompat.registerReceiver(this, record_status_receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
 
+            stop_server_upon_quit = false;
             Intent launch_record = new Intent(this, record_mode.isChecked() ? BurstImage.class : VideoRecord.class);
             try {
                 launch_record.putExtra("back_camera_id", findBackCameraId());
@@ -122,8 +130,9 @@ public class MainActivity extends AppCompatActivity {
     private Pair<String, String> generateFileNames(int record_count) {
         SimpleDateFormat date_format = new SimpleDateFormat("MMM_dd_yyyy", Locale.US);
         String date = date_format.format(new Date());
-        String media_name = date + "_IMU_data_" + record_count;
-        String imu_data_name = date + "_IMU_data_" + record_count + ".txt";
+        // Create filenames that share a common parent folder
+        String media_name = date + "_" + record_count + File.separator + "media";
+        String imu_data_name = date + "_" + record_count + File.separator + "IMU_data.txt";
         return new Pair<>(media_name, imu_data_name);
     }
 
@@ -135,9 +144,25 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        safeUnregisterReceiver();
+    protected void onStop() {
+        super.onStop();
+        // Check if BurstImage was used; if so, then send a shutdown signal to the server when MainActivity quits
+        if (stop_server_upon_quit) {
+            safeUnregisterReceiver();
+            String host_id = PreferenceManager.getDefaultSharedPreferences(this).getString("host_id", null);
+            int port_id = Integer.parseInt(PreferenceManager.getDefaultSharedPreferences(this).getString("port_id", null));
+            Thread stop_server = new Thread(() -> {
+                try {
+                    Socket socket = new Socket(host_id, port_id);
+                    DataOutputStream socket_ostream = new DataOutputStream(socket.getOutputStream());
+                    socket_ostream.writeInt(-1);
+                    socket.close();
+                } catch (IOException exception) {
+                    exception.printStackTrace();
+                }
+            });
+            stop_server.start();
+        }
     }
 
     private void safeUnregisterReceiver() {

@@ -163,11 +163,14 @@ public abstract class IMUCapture extends AppCompatActivity implements SensorEven
     }
 
     protected File setIMUFileAndGetMediaLocation(String imu_data_name, String media_name) throws IOException {
-        // Create a new file to store IMU measurement data
+        // Create new directories to the intended imu measurement data location and a new file to store data
         imu_data = new File(ContextCompat.getExternalFilesDirs(this, Environment.DIRECTORY_DOCUMENTS)[0], imu_data_name);
+        File parent_directory = imu_data.getParentFile();
+        assert parent_directory != null : "A parent directory couldn't be obtained from the supplied imu data name: " + imu_data_name;
         try {
-            boolean file_new = imu_data.createNewFile();
-            Log.i(FILE, "IMU data file (new: " + file_new + "; exists: " + imu_data.exists() + ") at " + imu_data.getPath());
+            boolean dir_new = parent_directory.mkdirs(), file_new = imu_data.createNewFile();
+            Log.i(FILE, "IMU data directory (new: " + dir_new + "; exists: " + parent_directory.exists() + ") at " + parent_directory.getPath()
+                    + ". file (new: " + file_new + "; exists: " + imu_data.exists() + ") at " + imu_data.getPath());
         } catch (IOException io_exception) {
             Log.e(FILE, "Creation failed: " + imu_data.getPath());
             Toast.makeText(this, "IMU data storage file cannot be created", Toast.LENGTH_LONG).show();
@@ -175,6 +178,6 @@ public abstract class IMUCapture extends AppCompatActivity implements SensorEven
         }
 
         // Return the location for media
-        return new File(ContextCompat.getExternalFilesDirs(this, Environment.DIRECTORY_DCIM)[0], media_name);
+        return new File(ContextCompat.getExternalFilesDirs(this, Environment.DIRECTORY_DOCUMENTS)[0], media_name);
     }
 }

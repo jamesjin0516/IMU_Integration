@@ -64,7 +64,7 @@ public class BurstImage extends IMUCapture {
         // Establish communication with localization server
         String host_id = PreferenceManager.getDefaultSharedPreferences(this).getString("host_id", null);
         int port_id = Integer.parseInt(PreferenceManager.getDefaultSharedPreferences(this).getString("port_id", null));
-        server_session = new ServerSession(host_id, port_id, getApplication());
+        server_session = new ServerSession(host_id, port_id);
 
         // Set up background thread to handle image capturing events
         callback_thread = new HandlerThread("camera_callback_thread");
@@ -100,7 +100,7 @@ public class BurstImage extends IMUCapture {
         callback_thread.quitSafely();
         try {
             callback_thread.join();
-            server_session.shutdown();
+            server_session.shutdown(new File(images_directory.getParentFile(), "floorplan_with_trajectories.png"));
         } catch (InterruptedException | ExecutionException exception) {
             exception.printStackTrace();
         }
