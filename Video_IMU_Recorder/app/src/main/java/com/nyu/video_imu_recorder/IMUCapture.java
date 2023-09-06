@@ -27,7 +27,9 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -38,8 +40,8 @@ public abstract class IMUCapture extends AppCompatActivity implements SensorEven
     private Sensor accelerometer, gyroscope, gravity_sensor;
     private IMUSession imu_session;
     private double[] gravity = {0, 0, 0};
-    private File imu_data;
-    private FileOutputStream imu_output;
+    private Map<String, File> imu_files;
+    private Map<String, FileOutputStream> imu_outputs;
     private final StringBuffer new_data_buffer = new StringBuffer();
     private long imu_start_time = -1;
 
@@ -69,20 +71,26 @@ public abstract class IMUCapture extends AppCompatActivity implements SensorEven
             }
         }
         // Feed data to imu session for integration and other processing
+        FileOutputStream appropriate_stream = null;
         if (event.sensor.getType() == gravity_sensor.getType()) {
             gravity = CoordinateShift.toDoubleArray(event.values);
         } else if (event.sensor.getType() == accelerometer.getType()) {
             imu_session.updateAccelerometer(event.timestamp, event.values, gravity);
+            appropriate_stream = imu_outputs.get("accelerometer");
         } else if (event.sensor.getType() == gyroscope.getType()) {
             imu_session.updateGyroscope(event.timestamp, event.values);
+            appropriate_stream = imu_outputs.get("gyroscope");
         }
         // Write the combined output from this measurement to the data file
-        StringBuilder data = new StringBuilder(new_data_buffer.toString());
+        String position_data = new_data_buffer.toString();
         new_data_buffer.delete(0, new_data_buffer.length());
-        data.append(imu_time).append(' ').append(event.sensor.getName()).append(' ').append(Arrays.toString(event.values)).append('\n');
-        Log.v(FILE, "imu data: " + data);
+        String sensor_data = imu_time + ' ' + event.sensor.getName() + ' ' + Arrays.toString(event.values) + '\n';
+        Log.v(FILE, "imu data:\n" + position_data + sensor_data);
         try {
-            imu_output.write(data.toString().getBytes(StandardCharsets.UTF_8));
+            imu_outputs.get("position").write(position_data.getBytes(StandardCharsets.UTF_8));
+            if (appropriate_stream != null) {
+                appropriate_stream.write(sensor_data.getBytes(StandardCharsets.UTF_8));
+            }
         } catch (IOException exception) {
             exception.printStackTrace();
         }
@@ -95,7 +103,9 @@ public abstract class IMUCapture extends AppCompatActivity implements SensorEven
 
     protected void startIMURecording() {
         try {
-            imu_output = new FileOutputStream(imu_data, true);
+            for (Map.Entry<String, File> entry : imu_files.entrySet()) {
+                imu_outputs.put(entry.getKey(), new FileOutputStream(entry.getValue(), true));
+            }
             int interval = Math.max(Math.max(accelerometer.getMinDelay(), gyroscope.getMinDelay()), gravity_sensor.getMinDelay());
             sensor_manager.registerListener(this, accelerometer, interval);
             sensor_manager.registerListener(this, gyroscope, interval);
@@ -111,8 +121,10 @@ public abstract class IMUCapture extends AppCompatActivity implements SensorEven
     protected void stopIMURecording() {
         sensor_manager.unregisterListener(this);
         try {
-            imu_output.flush();
-            imu_output.close();
+            for (FileOutputStream output_stream : imu_outputs.values()) {
+                output_stream.flush();
+                output_stream.close();
+            }
         } catch (IOException exception) {
             Log.e(FILE, "FileOutputStream failed to close");
             Toast.makeText(this, "IMU data failed to save, data lost!", Toast.LENGTH_SHORT).show();
@@ -136,7 +148,7 @@ public abstract class IMUCapture extends AppCompatActivity implements SensorEven
                 Log.i(FILE, "Latency: " + latency);
                 String latency_message = video_start_time + " video recording started. Latency between IMU and camera: "
                         + Math.abs(latency) + " (" + (latency < 0 ? "IMU" : "camera") + " started sooner)\n";
-                imu_output.write(latency_message.getBytes(StandardCharsets.UTF_8));
+                imu_outputs.get("position").write(latency_message.getBytes(StandardCharsets.UTF_8));
             } catch (InterruptedException | IOException exception) {
                 exception.printStackTrace();
             }
@@ -164,15 +176,22 @@ public abstract class IMUCapture extends AppCompatActivity implements SensorEven
 
     protected File setIMUFileAndGetMediaLocation(String imu_data_name, String media_name) throws IOException {
         // Create new directories to the intended imu measurement data location and a new file to store data
-        imu_data = new File(ContextCompat.getExternalFilesDirs(this, Environment.DIRECTORY_DOCUMENTS)[0], imu_data_name);
+        File imu_data = new File(ContextCompat.getExternalFilesDirs(this, Environment.DIRECTORY_DOCUMENTS)[0], imu_data_name);
         File parent_directory = imu_data.getParentFile();
         assert parent_directory != null : "A parent directory couldn't be obtained from the supplied imu data name: " + imu_data_name;
+        imu_files = Map.of("accelerometer", new File(parent_directory, imu_data.getName() + "accelerometer.txt"),
+                "gyroscope", new File(parent_directory, imu_data.getName() + "gyroscope.txt"),
+                "position", new File(parent_directory, imu_data.getName() + "position.txt"));
+        imu_outputs = new HashMap<>(3);
         try {
-            boolean dir_new = parent_directory.mkdirs(), file_new = imu_data.createNewFile();
-            Log.i(FILE, "IMU data directory (new: " + dir_new + "; exists: " + parent_directory.exists() + ") at " + parent_directory.getPath()
-                    + ". file (new: " + file_new + "; exists: " + imu_data.exists() + ") at " + imu_data.getPath());
+            boolean dir_new = parent_directory.mkdirs();
+            Log.i(FILE, "IMU data directory (new: " + dir_new + "; exists: " + parent_directory.exists() + ") at " + parent_directory.getPath());
+            for (File data_file : imu_files.values()) {
+                boolean file_new = data_file.createNewFile();
+                Log.i(FILE, "IMU file (new: " + file_new + "; exists: " + data_file.exists() + ") at " + data_file.getPath());
+            }
         } catch (IOException io_exception) {
-            Log.e(FILE, "Creation failed: " + imu_data.getPath());
+            Log.e(FILE, "Creation failed for a data file at " + parent_directory.getPath());
             Toast.makeText(this, "IMU data storage file cannot be created", Toast.LENGTH_LONG).show();
             throw io_exception;
         }

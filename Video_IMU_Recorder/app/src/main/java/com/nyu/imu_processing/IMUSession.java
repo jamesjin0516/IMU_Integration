@@ -67,7 +67,10 @@ public class IMUSession {
             Vector3D rotation_axis = new Vector3D(Arrays.copyOfRange(delta_rotation_vector, 0, 3));
 
             // Obtain rotation matrix from axis angle vector and calculate degrees turned along each axis
-            double[][] delta_rotation_matrix = new Rotation(rotation_axis, delta_rotation_vector[3], RotationConvention.VECTOR_OPERATOR).getMatrix();
+
+            double[][] delta_rotation_matrix = rotation_axis.getNorm() == 0 ?
+                    new double[][]{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}} :
+                    new Rotation(rotation_axis, delta_rotation_vector[3], RotationConvention.VECTOR_OPERATOR).getMatrix();
             turned_angle[0] += Math.toDegrees(Math.atan2(delta_rotation_matrix[2][1], delta_rotation_matrix[2][2]));
             turned_angle[1] += Math.toDegrees(Math.atan2(-delta_rotation_matrix[2][0], CoordinateShift.magnitude(Arrays.copyOfRange(delta_rotation_matrix[2], 1, 3))));
             turned_angle[2] += Math.toDegrees(Math.atan2(delta_rotation_matrix[1][0], delta_rotation_matrix[0][0]));

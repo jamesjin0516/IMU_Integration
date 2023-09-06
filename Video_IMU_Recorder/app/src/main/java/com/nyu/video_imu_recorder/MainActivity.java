@@ -131,9 +131,8 @@ public class MainActivity extends AppCompatActivity {
         SimpleDateFormat date_format = new SimpleDateFormat("MMM_dd_yyyy", Locale.US);
         String date = date_format.format(new Date());
         // Create filenames that share a common parent folder
-        String media_name = date + "_" + record_count + File.separator + "media";
-        String imu_data_name = date + "_" + record_count + File.separator + "IMU_data.txt";
-        return new Pair<>(media_name, imu_data_name);
+        String content_directory = date + "_" + record_count + File.separator;
+        return new Pair<>(content_directory + "media", content_directory + "IMU_");
     }
 
     @Override
