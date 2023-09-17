@@ -37,7 +37,7 @@ public abstract class IMUCapture extends AppCompatActivity implements SensorEven
 
     private static final String FILE = "IMU_data_file";
     private SensorManager sensor_manager;
-    private Sensor accelerometer, gyroscope, gravity_sensor;
+    private Sensor accelerometer, linear_acceleration, gyroscope, gravity_sensor;
     private IMUSession imu_session;
     private double[] gravity = {0, 0, 0};
     private Map<String, File> imu_files;
@@ -56,6 +56,7 @@ public abstract class IMUCapture extends AppCompatActivity implements SensorEven
 
         sensor_manager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         accelerometer = sensor_manager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+        linear_acceleration = sensor_manager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION);
         gyroscope = sensor_manager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
         gravity_sensor = sensor_manager.getDefaultSensor(Sensor.TYPE_GRAVITY);
     }
@@ -74,8 +75,10 @@ public abstract class IMUCapture extends AppCompatActivity implements SensorEven
         FileOutputStream appropriate_stream = null;
         if (event.sensor.getType() == gravity_sensor.getType()) {
             gravity = CoordinateShift.toDoubleArray(event.values);
-        } else if (event.sensor.getType() == accelerometer.getType()) {
+        } else if (event.sensor.getType() == linear_acceleration.getType()) {
             imu_session.updateAccelerometer(event.timestamp, event.values, gravity);
+        } else if (event.sensor.getType() == accelerometer.getType()) {
+            imu_session.updateIMUPose(event.timestamp, event.values);
             appropriate_stream = imu_outputs.get("accelerometer");
         } else if (event.sensor.getType() == gyroscope.getType()) {
             imu_session.updateGyroscope(event.timestamp, event.values);
@@ -86,6 +89,7 @@ public abstract class IMUCapture extends AppCompatActivity implements SensorEven
         new_data_buffer.delete(0, new_data_buffer.length());
         String sensor_data = imu_time + ' ' + event.sensor.getName() + ' ' + Arrays.toString(event.values) + '\n';
         Log.v(FILE, "imu data:\n" + position_data + sensor_data);
+        // TODO: since the localized image serving as IMU's reference is now changing, the integrated position is no longer meaningful
         try {
             imu_outputs.get("position").write(position_data.getBytes(StandardCharsets.UTF_8));
             if (appropriate_stream != null) {
@@ -101,13 +105,20 @@ public abstract class IMUCapture extends AppCompatActivity implements SensorEven
         Log.v(FILE, sensor.getName() + " accuracy changed to " + accuracy);
     }
 
+    protected void resetIMUOrientation() {
+        imu_session.setQuaternionPose(1, 0, 0, 0);
+    }
+
     protected void startIMURecording() {
         try {
             for (Map.Entry<String, File> entry : imu_files.entrySet()) {
                 imu_outputs.put(entry.getKey(), new FileOutputStream(entry.getValue(), true));
             }
-            int interval = Math.max(Math.max(accelerometer.getMinDelay(), gyroscope.getMinDelay()), gravity_sensor.getMinDelay());
+            // Determine the best compatible sensor frequency and start listening from all sensors
+            int interval = Math.max(Math.max(Math.max(accelerometer.getMinDelay(), linear_acceleration.getMinDelay()),
+                    gyroscope.getMinDelay()), gravity_sensor.getMinDelay());
             sensor_manager.registerListener(this, accelerometer, interval);
+            sensor_manager.registerListener(this, linear_acceleration, interval);
             sensor_manager.registerListener(this, gyroscope, interval);
             sensor_manager.registerListener(this, gravity_sensor, interval);
         } catch (FileNotFoundException exception) {

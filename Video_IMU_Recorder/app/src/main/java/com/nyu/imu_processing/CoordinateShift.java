@@ -43,10 +43,10 @@ public class CoordinateShift {
 
     static double[] axisAngleVector(double[] angular_accel, double dT) {
         // Calculate the angular speed of the sample
-        double omegaMagnitude = CoordinateShift.magnitude(angular_accel);
+        double omegaMagnitude = magnitude(angular_accel);
         // Normalize the rotation vector if it's big enough to get the axis
         // (that is, EPSILON should represent your maximum allowable margin of error)
-        double[] norm_rotation = CoordinateShift.normalized(angular_accel);
+        double[] norm_rotation = normalized(angular_accel);
 
         // Integrate around this axis with the angular speed by the timestep
         // in order to get a delta rotation from this sample over the timestep
@@ -64,7 +64,7 @@ public class CoordinateShift {
     }
 
     static Quaternion newQuaternionPose(Quaternion last_pose, float[] acceleration, double[] angular_accel, double dT) {
-        double[] norm_acceleration = normalized(CoordinateShift.toDoubleArray(acceleration));
+        double[] norm_acceleration = normalized(toDoubleArray(acceleration));
         double q0 = last_pose.getQ0(), q1 = last_pose.getQ1(), q2 = last_pose.getQ2(), q3 = last_pose.getQ3();
         // Estimated direction of gravity and magnetic flux
         double[] approx_field = {2 * (q1 * q3 - q0 * q2), 2 * (q0 * q1 + q2 * q3), q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3};

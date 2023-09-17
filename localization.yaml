@@ -1,7 +1,7 @@
 location: 
  place: New_York_University
- building: 6_MetroTech
- floor: Metrotech_6_Floor_4_With_Stairs
+ building: Engineering_School_Building_Six
+ floor: fourth_floor
  scale: 0.01209306372
 
 server:
@@ -15,7 +15,7 @@ server:
   sink_type: "video"
 
 IO_root: "/mnt/data/UNav-IO"
-server_dir: /home/unav/Desktop/UNav/
+server_dir: /home/unav/Desktop/UNav_for_students/
 data_name: Jul_24_2023_IMU_data_1
 
 IMU_regex:

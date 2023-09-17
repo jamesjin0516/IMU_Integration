@@ -20,9 +20,9 @@ public class IMUSession {
     private final String[] alignment_methods;
     private final String alignment_method;
     private final ArrayList<Pair<Long, double[]>> accels_info = new ArrayList<>(), velos_info = new ArrayList<>(), poss_info = new ArrayList<>();
-    private final double[] angular_accel = {0, 0, 0}, turned_angle = {0, 0, 0};
+    private final double[] tangential_accel = {0, 0, 0}, angular_accel = {0, 0, 0}, turned_angle = {0, 0, 0};
     private Quaternion pose = Quaternion.IDENTITY;
-    private long gyro_timestamp = 0;
+    private long accel_timestamp = 0, gyro_timestamp = 0;
 
     public IMUSession(double[] world_gravity, String[] alignment_methods, String alignment_method) {
         this.world_gravity = world_gravity;
@@ -30,12 +30,12 @@ public class IMUSession {
         this.alignment_method = alignment_method;
     }
 
-    public void updateAccelerometer(long event_timestamp, float[] accel_values, double[] gravity) {
-        synchronized (this) {
-            // Transform the new acceleration readings into the world coordinate frame
+    public void updateAccelerometer(long event_timestamp, float[] linear_accel, double[] gravity) {
+        synchronized (accels_info) {
+            // Transform the new linear acceleration readings into the world coordinate frame
             final double dT = accels_info.size() == 0 ? 0 : (event_timestamp - accels_info.get(accels_info.size() - 1).getFirst()) / NANOSECONDS;
-            double[] aligned_accel = alignAcceleration(accel_values, gravity, dT);
-            // Append to accelerations data and initialize velocities and positions data if necessary
+            double[] aligned_accel = alignAcceleration(linear_accel, gravity, dT);
+            // Append to linear accelerations data and initialize velocities and positions data if necessary
             accels_info.add(new Pair<>(event_timestamp, aligned_accel));
             if (velos_info.size() == 0) velos_info.add(new Pair<>(accels_info.get(0).getFirst(), new double[]{0, 0, 0}));
             if (poss_info.size() == 0) poss_info.add(new Pair<>(accels_info.get(0).getFirst(), new double[]{0, 0, 0}));
@@ -43,7 +43,7 @@ public class IMUSession {
     }
 
     public Map<String, List<Pair<Long, double[]>>> retrieveKinematicArrays() {
-        synchronized (this) {
+        synchronized (accels_info) {
             doubleIntegration();
             // Map all three kinematic arrays while excluding each array's last value
             int last_index = poss_info.size() - 1;
@@ -67,7 +67,6 @@ public class IMUSession {
             Vector3D rotation_axis = new Vector3D(Arrays.copyOfRange(delta_rotation_vector, 0, 3));
 
             // Obtain rotation matrix from axis angle vector and calculate degrees turned along each axis
-
             double[][] delta_rotation_matrix = rotation_axis.getNorm() == 0 ?
                     new double[][]{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}} :
                     new Rotation(rotation_axis, delta_rotation_vector[3], RotationConvention.VECTOR_OPERATOR).getMatrix();
@@ -79,27 +78,39 @@ public class IMUSession {
         gyro_timestamp = event_timestamp;
     }
 
-    private double[] alignAcceleration(float[] accel_values, double[] gravity, double dT) {
+    public void updateIMUPose(long event_timestamp, float[] accel_values) {
+        final double dT = accel_timestamp == 0 ? 0 : (event_timestamp - accel_timestamp) / NANOSECONDS;
+        synchronized (alignment_method) {
+            // Update quaternion representing device pose using gyroscope and accelerometer values (without subtracting gravity)
+            pose = CoordinateShift.newQuaternionPose(pose, accel_values, angular_accel, dT);
+        }
+        System.arraycopy(CoordinateShift.toDoubleArray(accel_values), 0, tangential_accel, 0, tangential_accel.length);
+        accel_timestamp = event_timestamp;
+    }
+
+    public void setQuaternionPose(double scalar, double v1, double v2, double v3) {
+        synchronized (alignment_method) {
+            pose = new Quaternion(scalar, v1, v2, v3);
+        }
+    }
+
+    private double[] alignAcceleration(float[] linear_accel, double[] gravity, double dT) {
         double[] aligned_accel;
         if (alignment_method.equals(alignment_methods[0])) {
-            // Update quaternion representing device pose using gyroscope and accelerometer values
-            pose = CoordinateShift.newQuaternionPose(pose, accel_values, angular_accel, dT);
-            // Use quaternion to rotate acceleration values with formula qvq*
-            aligned_accel = pose.multiply(new Quaternion(CoordinateShift.toDoubleArray(accel_values))).multiply(pose.getConjugate()).getVectorPart();
+            synchronized (alignment_method) {
+                // Use quaternion to rotate acceleration values with formula qvq*
+                aligned_accel = pose.multiply(new Quaternion(CoordinateShift.toDoubleArray(linear_accel))).multiply(pose.getConjugate()).getVectorPart();
+            }
         } else {
             // Obtain rotation matrix by comparing gravity in device's and in world's axes
             double[] rot_matrix = CoordinateShift.rotationMatrix(gravity, world_gravity.clone());
             // Apply the rotation matrix to the acceleration readings
             aligned_accel = new double[]{0, 0, 0};
-            for (int row = 0; row < accel_values.length; row++) {
-                for (int comp = 0; comp < accel_values.length; comp++) {
-                    aligned_accel[row] += accel_values[comp] * rot_matrix[row * 3 + comp];
+            for (int row = 0; row < linear_accel.length; row++) {
+                for (int comp = 0; comp < linear_accel.length; comp++) {
+                    aligned_accel[row] += linear_accel[comp] * rot_matrix[row * 3 + comp];
                 }
             }
-        }
-        // Subtract gravity from the newly obtained acceleration values in the world coordinate frame
-        for (int index = 0; index < aligned_accel.length; ++index) {
-            aligned_accel[index] -= world_gravity[index];
         }
         return aligned_accel;
     }

@@ -31,6 +31,8 @@ def load_configs(args):
     hloc_config_path = server_dir + "configs/hloc.yaml"
     with open(hloc_config_path, 'r') as f:
         hloc_config = yaml.safe_load(f)
+    # Manually set configuration to provide full 6 degree of freedom
+    hloc_config["hloc"]["simple_pose"] = False
 
     # Provide option for overriding location configuration using arguments
     location_keys = list(server_config["location"].keys())

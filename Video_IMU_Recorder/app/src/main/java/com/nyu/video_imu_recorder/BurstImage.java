@@ -46,8 +46,8 @@ import java.util.concurrent.ExecutionException;
 public class BurstImage extends IMUCapture {
     private static final int CAMERA_PERMISSION = new SecureRandom().nextInt(100);
     private static final String CAM = "Camera_configuration";
-    private HandlerThread callback_thread;
-    private Handler callback_handler;
+    private HandlerThread callback_thread, request_thread;
+    private Handler callback_handler, request_handler;
     private ImageReader image_reader;
     private CameraDevice camera_device;
     private ServerSession server_session;
@@ -66,10 +66,13 @@ public class BurstImage extends IMUCapture {
         int port_id = Integer.parseInt(PreferenceManager.getDefaultSharedPreferences(this).getString("port_id", null));
         server_session = new ServerSession(host_id, port_id);
 
-        // Set up background thread to handle image capturing events
+        // Set up background threads to handle image capturing events and localization requests
         callback_thread = new HandlerThread("camera_callback_thread");
         callback_thread.start();
         callback_handler = new Handler(callback_thread.getLooper());
+        request_thread = new HandlerThread("localization_request_thread");
+        request_thread.start();
+        request_handler = new Handler(request_thread.getLooper());
 
         SurfaceView preview = findViewById(R.id.preview);
         // Use a callback to ensure the preview element responsible for showing the camera footage is ready first
@@ -98,8 +101,10 @@ public class BurstImage extends IMUCapture {
         camera_device.close();
         stopIMURecording();
         callback_thread.quitSafely();
+        request_thread.quitSafely();
         try {
             callback_thread.join();
+            request_thread.join();
             server_session.shutdown(new File(images_directory.getParentFile(), "floorplan_with_trajectories.png"));
         } catch (InterruptedException | ExecutionException exception) {
             exception.printStackTrace();
@@ -215,10 +220,8 @@ public class BurstImage extends IMUCapture {
             image_output.close();
             // Note the start time of the recording in the imu data file
             notifyVideoStart(timestamp);
-            // Dispatch a localization request using the newly captured image
-            String pose = server_session.requestLocalization(timestamp, image_bytes, generatePositionData());
-            if (pose != null) Log.i(CAM, "localized pose: " + pose);
-        } catch (IOException | ExecutionException | InterruptedException exception) {
+            request_handler.post(() -> updatePose(timestamp, image_bytes));
+        } catch (IOException exception) {
             exception.printStackTrace();
         }
 
@@ -230,6 +233,18 @@ public class BurstImage extends IMUCapture {
             startIMURecording();
         }
     };
+
+    private void updatePose(long timestamp, byte[] image_bytes) {
+        double[] pose = null;
+        try {
+            // Dispatch a localization request using the newly captured image
+            pose = server_session.requestLocalization(timestamp, image_bytes, generatePositionData());
+        } catch (ExecutionException | InterruptedException exception) {
+            exception.printStackTrace();
+        }
+        // If 6 degree of freedom is available, then revert the transformation between the IMU and image back to identity
+        if (pose != null && pose.length == 6) resetIMUOrientation();
+    }
 
     protected File setIMUFileAndGetMediaLocation(String imu_data_name, String media_name) throws IOException {
         // Create a new folder to store captured images
