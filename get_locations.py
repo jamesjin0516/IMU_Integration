@@ -22,12 +22,12 @@ def prepare_for_localization():
         config = yaml.safe_load(config_file)
     args = configure_parser_and_parse()
     # Configure image sources and socket information
-    data_name = (args.data_name if args.data_name else config["data_name"]).strip("/")
-    image_names, floorplan_scale = sorted(os.listdir(data_name)), config["location"]["scale"]
+    data_name = (args.data_name if args.data_name else config["data_name"]).strip(os.sep)
+    image_names, floorplan_scale = sorted(os.listdir(data_name + os.sep + "media")), config["location"]["scale"]
     host_port = (args.csv_host.split(",")[0], int(args.csv_host.split(",")[1])) if args.csv_host else \
                 (config["server"]["host"], config["server"]["port"])
     # Open the text file of IMU data and store its lines into a list; prepare the data's transformation matrix
-    with open(data_name + ".txt", "r") as data_file:
+    with open(data_name + os.sep + "IMU_data.txt", "r") as data_file:
         data_lines = data_file.readlines()
     imu_transform = np.array([config["IMU_transform"][column] for column in config["IMU_transform"].keys()]).transpose()
     # Regular expression patterns for extracting specific IMU information from text files
@@ -91,7 +91,7 @@ if __name__ == "__main__":
     previous_pose, previous_name = None, None
     # Localize each image and synchronize IMU data by advancing within the IMU data file if localization is successful
     for image_name in image_names:
-        pose = get_pose_from_image(data_name + "/" + image_name, sock)
+        pose = get_pose_from_image(data_name + os.sep + "media" + os.sep + image_name, sock)
         # TODO: prevent image poses that are too close to each other
         """
         if pose and previous_pose and np.linalg.norm(np.delete(np.subtract(np.array(re_get["values"](pose)), np.array(re_get["values"](previous_pose))), -1)) < 100:

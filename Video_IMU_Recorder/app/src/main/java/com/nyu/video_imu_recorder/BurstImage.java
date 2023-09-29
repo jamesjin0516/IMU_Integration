@@ -5,10 +5,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.ImageFormat;
-import android.hardware.Sensor;
-import android.hardware.SensorEvent;
-import android.hardware.SensorEventListener;
-import android.hardware.SensorManager;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
@@ -20,7 +16,6 @@ import android.hardware.camera2.params.SessionConfiguration;
 import android.media.Image;
 import android.media.ImageReader;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.SystemClock;
@@ -33,38 +28,30 @@ import android.view.SurfaceView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
-import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 
 import com.nyu.imu_processing.CoordinateShift;
 import com.nyu.imu_processing.IMUSession;
 
+import org.json.JSONException;
+
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 
-public class BurstImage extends AppCompatActivity implements SensorEventListener {
+public class BurstImage extends IMUCapture {
     private static final int CAMERA_PERMISSION = new SecureRandom().nextInt(100);
-    private static final String CAM = "Camera_configuration", FILE = "IMU_data_file";
+    private static final String CAM = "Camera_configuration";
     private HandlerThread callback_thread;
     private Handler callback_handler;
     private ImageReader image_reader;
     private CameraDevice camera_device;
-    private SensorManager sensor_manager;
-    private Sensor accelerometer, gyroscope, gravity_sensor;
-    private final IMUSession imu_session = new IMUSession(new double[]{0, 0, SensorManager.GRAVITY_EARTH},
-            new String[]{"align_quaternion", "align_gravity"}, "align_quaternion", 20000000);
-    private double[] gravity = {0, 0, 0};
-    private File imu_data, images_directory;
-    private FileOutputStream imu_output;
-    private long[] video_imu_start_times = {-1, -1};
+    private File images_directory;
     private long last_save_time = 0;
 
     @Override
@@ -79,11 +66,6 @@ public class BurstImage extends AppCompatActivity implements SensorEventListener
         callback_thread = new HandlerThread("camera_callback_thread");
         callback_thread.start();
         callback_handler = new Handler(callback_thread.getLooper());
-
-        sensor_manager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
-        accelerometer = sensor_manager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
-        gyroscope = sensor_manager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
-        gravity_sensor = sensor_manager.getDefaultSensor(Sensor.TYPE_GRAVITY);
 
         SurfaceView preview = findViewById(R.id.preview);
         // Use a callback to ensure the preview element responsible for showing the camera footage is ready first
@@ -156,7 +138,7 @@ public class BurstImage extends AppCompatActivity implements SensorEventListener
             public void onOpened(@NonNull CameraDevice camera) {
                 camera_device = camera;
                 try {
-                    prepareDataStorage(file_names[0], file_names[1]);
+                    images_directory = setIMUFileAndGetMediaLocation(file_names[0], file_names[1]);
                     configureCameraOutputs(preview);
                 } catch (CameraAccessException | IOException exception) {
                     exception.printStackTrace();
@@ -218,20 +200,18 @@ public class BurstImage extends AppCompatActivity implements SensorEventListener
         byte[] image_bytes = new byte[image_buffer.remaining()];
         image_buffer.get(image_bytes);
         image.close();
+        // Note the start time of the recording in the imu data file
+        notifyVideoStart(timestamp);
 
         File image_file = new File(images_directory, timestamp + ".jpeg");
         try {
+            saveTimestampedIMUData(timestamp);
             // Write the byte data into the image file
             FileOutputStream image_output = new FileOutputStream(image_file);
             image_output.write(image_bytes);
             image_output.flush();
             image_output.close();
-            // Note the start time of the recording in the imu data file
-            if (video_imu_start_times[0] == -1) {
-                imu_output.write((timestamp + " video recording started. ").getBytes(StandardCharsets.UTF_8));
-                video_imu_start_times[0] = timestamp;
-            }
-        } catch (IOException exception) {
+        } catch (IOException | JSONException exception) {
             exception.printStackTrace();
         }
 
@@ -244,89 +224,12 @@ public class BurstImage extends AppCompatActivity implements SensorEventListener
         }
     };
 
-    private void broadcast_record_status(String status) {
-        Log.i(CAM, "status to broadcast: " + status);
-        Intent broadcast = new Intent();
-        broadcast.setAction(getPackageName() + ".RECORD_STATUS");
-        broadcast.putExtra("status", status);
-        broadcast.setPackage(getPackageName());
-        sendBroadcast(broadcast);
-    }
-
-    @Override
-    public void onSensorChanged(SensorEvent event) {
-        String data = "";
-        if (video_imu_start_times[1] == -1) video_imu_start_times[1] = event.timestamp;
-        // Calculate the time difference between the IMU starting and the camera starting
-        if (video_imu_start_times[0] > 0 && video_imu_start_times[1] > 0) {
-            long latency = video_imu_start_times[1] - video_imu_start_times[0];
-            data += "Latency between IMU and camera: " + Math.abs(latency) + " (" + (latency < 0 ? "IMU" : "camera") + " started sooner)\n";
-            Log.i(FILE, "Latency: " + latency);
-            video_imu_start_times = new long[]{0, 0};
-        }
-        // Get processed data from alignment and integration algorithms etc. in imu session
-        if (event.sensor.getType() == gravity_sensor.getType()) {
-            gravity = CoordinateShift.toDoubleArray(event.values);
-        } else if (event.sensor.getType() == accelerometer.getType()) {
-            data += imu_session.updateAccelerometer(event.timestamp, event.values, gravity);
-        } else if (event.sensor.getType() == gyroscope.getType()) {
-            imu_session.updateGyroscope(event.timestamp, event.values);
-        }
-        // Write the combined output from this measurement to the data file
-        Log.v(FILE, "imu data: " + data);
-        try {
-            imu_output.write(data.getBytes(StandardCharsets.UTF_8));
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    @Override
-    public void onAccuracyChanged(Sensor sensor, int accuracy) {
-        Log.v(FILE, sensor.getName() + " accuracy changed to " + accuracy);
-    }
-
-    private void prepareDataStorage(String imu_data_name, String media_name) throws IOException {
-        // Create a new file to store IMU measurement data
-        imu_data = new File(ContextCompat.getExternalFilesDirs(this, Environment.DIRECTORY_DOCUMENTS)[0], imu_data_name);
-        try {
-            Log.i(FILE, "IMU data file (new: " + imu_data.createNewFile() + "; exists: " + imu_data.exists() + ") at " + imu_data.getPath());
-        } catch (IOException io_exception) {
-            Log.e(FILE, "Creation failed: " + imu_data.getPath());
-            Toast.makeText(this, "IMU data storage file cannot be created", Toast.LENGTH_LONG).show();
-            throw io_exception;
-        }
-
+    protected File setIMUFileAndGetMediaLocation(String imu_data_name, String media_name) throws IOException {
         // Create a new folder to store captured images
-        images_directory = new File(ContextCompat.getExternalFilesDirs(this, Environment.DIRECTORY_DCIM)[0], media_name);
-        Log.i(CAM, "Image directory (newly created: " + images_directory.mkdirs() + ") at " + images_directory.getAbsolutePath());
-    }
-
-    private void startIMURecording() {
-        try {
-            imu_output = new FileOutputStream(imu_data, true);
-            int interval = Math.max(Math.max(accelerometer.getMinDelay(), gyroscope.getMinDelay()), gravity_sensor.getMinDelay());
-            sensor_manager.registerListener(this, accelerometer, interval);
-            sensor_manager.registerListener(this, gyroscope, interval);
-            sensor_manager.registerListener(this, gravity_sensor, interval);
-        } catch (FileNotFoundException exception) {
-            Log.e(FILE, "FileOutputStream failed to be opened");
-            exception.printStackTrace();
-            Toast.makeText(this, "IMU data storage file cannot be opened", Toast.LENGTH_LONG).show();
-            finish();
-        }
-    }
-
-    private void stopIMURecording() {
-        sensor_manager.unregisterListener(this);
-        try {
-            imu_output.flush();
-            imu_output.close();
-        } catch (IOException exception) {
-            Log.e(FILE, "FileOutputStream failed to close");
-            Toast.makeText(this, "IMU data failed to save, data lost!", Toast.LENGTH_SHORT).show();
-            exception.printStackTrace();
-        }
+        File new_images_directory = super.setIMUFileAndGetMediaLocation(imu_data_name, media_name);
+        boolean dir_new = new_images_directory.mkdirs();
+        Log.i(CAM, "Image directory (newly created: " + dir_new + ") at " + new_images_directory.getAbsolutePath());
+        return new_images_directory;
     }
 
     // The option to capture a singular image per method call, currently not used

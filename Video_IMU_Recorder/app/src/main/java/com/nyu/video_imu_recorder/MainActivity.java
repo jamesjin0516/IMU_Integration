@@ -79,7 +79,7 @@ public class MainActivity extends AppCompatActivity {
             try {
                 launch_record.putExtra("back_camera_id", findBackCameraId());
                 // Create appropriate file names for video recording and imu data given number of recordings made
-                Pair<String, String> file_names = generateFileNames(record_count);
+                Pair<String, String> file_names = generateFileNames();
                 launch_record.putExtra("media_name", file_names.first);
                 launch_record.putExtra("imu_data_name", file_names.second);
                 startActivity(launch_record);
@@ -110,11 +110,9 @@ public class MainActivity extends AppCompatActivity {
         throw new CameraAccessException(CameraAccessException.CAMERA_DISCONNECTED, "No back-facing camera found.");
     }
 
-    private Pair<String, String> generateFileNames(int record_count) {
-        SimpleDateFormat date_format = new SimpleDateFormat("MMM_dd_yyyy", Locale.US);
-        String date = date_format.format(new Date());
-        String media_name = date + "_IMU_data_" + record_count;
-        String imu_data_name = date + "_IMU_data_" + record_count + ".txt";
+    private static Pair<String, String> generateFileNames() {
+        String media_name = "media";
+        String imu_data_name = "IMU_data.txt";
         return new Pair<>(media_name, imu_data_name);
     }
 

@@ -9,6 +9,7 @@ import org.apache.commons.math3.util.Pair;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -21,7 +22,7 @@ public class IMUSession {
     private String alignment_method = "";
     private final long integration_interval;
     private final ArrayList<Pair<Long, double[]>> accels_info = new ArrayList<>(), velos_info = new ArrayList<>(), poss_info = new ArrayList<>();
-    private final double[] angular_accel = {0, 0, 0}, turned_angle = {0, 0, 0};
+    private final double[] angular_velo = {0, 0, 0}, turned_angle = {0, 0, 0};
     private Quaternion pose = Quaternion.IDENTITY;
     private long gyro_timestamp = 0, integration_timestamp;
 
@@ -72,6 +73,13 @@ public class IMUSession {
         return String.join("", output);
     }
 
+    public static Map<String, Object> getLatest6DOFData(long accel_timestamp, double[] acceleration, long angular_velo_timestamp, double[] angular_velo) {
+        double[] six_DOF = Arrays.copyOf(angular_velo, angular_velo.length + acceleration.length);
+        System.arraycopy(acceleration, 0, six_DOF, angular_velo.length, acceleration.length);
+        return Map.of("imu_timestamp", accel_timestamp, "6DOF_gyro_then_accel", six_DOF, "accelerometer_delay",
+                accel_timestamp - angular_velo_timestamp);
+    }
+
     public void updateGyroscope(long event_timestamp, float[] gyro_values) {
         if (gyro_timestamp != 0) {
             final double dT = (event_timestamp - gyro_timestamp) / NANOSECONDS;
@@ -84,7 +92,7 @@ public class IMUSession {
             turned_angle[1] += Math.toDegrees(Math.atan2(-delta_rotation_matrix[2][0], CoordinateShift.magnitude(Arrays.copyOfRange(delta_rotation_matrix[2], 1, 3))));
             turned_angle[2] += Math.toDegrees(Math.atan2(delta_rotation_matrix[1][0], delta_rotation_matrix[0][0]));
         }
-        System.arraycopy(CoordinateShift.toDoubleArray(gyro_values), 0, angular_accel, 0, angular_accel.length);
+        System.arraycopy(CoordinateShift.toDoubleArray(gyro_values), 0, angular_velo, 0, angular_velo.length);
         gyro_timestamp = event_timestamp;
     }
 
@@ -92,7 +100,7 @@ public class IMUSession {
         double[] aligned_accel;
         if (alignment_method.equals(alignment_methods[0])) {
             // Update quaternion representing device pose using gyroscope and accelerometer values
-            pose = CoordinateShift.newQuaternionPose(pose, accel_values, angular_accel, dT);
+            pose = CoordinateShift.newQuaternionPose(pose, accel_values, angular_velo, dT);
             // Use quaternion to rotate acceleration values with formula qvq*
             aligned_accel = pose.multiply(new Quaternion(CoordinateShift.toDoubleArray(accel_values))).multiply(pose.getConjugate()).getVectorPart();
         } else {
